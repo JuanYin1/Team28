@@ -2,10 +2,10 @@
 1. clone Mini-Agent in Team28 folder:
 ```python
 # in Team28/:
-git clone https://github.com/MiniMax-AI/Mini-Agent
+git clone git@github.com:MiniMax-AI/Mini-Agent.git
 ```
 2. config Mini-Agent
-
+https://github.com/MiniMax-AI/Mini-Agent
 
 
 # Step2: run tests:
