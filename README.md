@@ -1,6 +1,6 @@
 # Step 1: config the mini-agent system 
 1. clone Mini-Agent in Team28 folder:
-```python
+```bash
 # in Team28/:
 git clone git@github.com:MiniMax-AI/Mini-Agent.git
 ```
@@ -10,7 +10,7 @@ https://github.com/MiniMax-AI/Mini-Agent
 
 # Step2: run tests:
 ## Phase 1 - Initial Assessment (Basic Evaluation)
-```python
+```bash
   python agentic_sys/integrated_mini_agent_evaluation.py
 ```
   What it does:
@@ -20,7 +20,7 @@ https://github.com/MiniMax-AI/Mini-Agent
   - Creates comprehensive_analysis_YYYYMMDD_HHMMSS.md report
 
 ## Phase 2 - Enhanced Memory Investigation
-```
+```bash
   python agentic_sys/enhanced_comprehensive_evaluation.py
 ```
   
