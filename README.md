@@ -1,7 +1,7 @@
 # Step 1: config the mini-agent system 
 1. clone Mini-Agent in Team28 folder:
 ```python
-# in Team28:
+# in Team28/:
 git clone https://github.com/MiniMax-AI/Mini-Agent
 ```
 2. config Mini-Agent
