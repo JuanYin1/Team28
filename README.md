@@ -1,6 +1,12 @@
 # Step 1: config the mini-agent system 
-在miniagent的readme： 
-https://github.com/MiniMax-AI/Mini-Agent
+1. clone Mini-Agent in Team28 folder:
+```python
+# in Team28:
+git clone https://github.com/MiniMax-AI/Mini-Agent
+```
+2. config Mini-Agent
+
+
 
 # Step2: run tests:
 ## Phase 1 - Initial Assessment (Basic Evaluation)
