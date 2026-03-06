@@ -1,0 +1,61 @@
+{
+  "test_case": {
+    "name": "data_analysis_task",
+    "category": "analysis",
+    "description": "Analyze data and generate insights with multiple steps",
+    "task_prompt": "Please help me analyze some sample data:\n\n1. Create a CSV file called 'sales_data.csv' with this data:\n   - Headers: Month, Sales, Profit\n   - Data rows:\n     January,10000,2000\n     February,12000,2400\n     March,9000,1800\n     April,15000,3000\n     May,11000,2200\n\n2. Write a Python script that:\n   - Reads the CSV file\n   - Calculates total sales and profit\n   - Finds the month with highest sales\n   - Calculates average monthly profit\n   - Saves results to 'analysis_results.txt'\n\n3. Run the script and show me the analysis results"
+  },
+  "clear_metrics": {
+    "llm_api_calls": 10,
+    "total_tokens_used": 960,
+    "tool_executions": 3,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.01192,
+    "context_window_usage": 0.0,
+    "total_task_time": 28.846123933792114,
+    "agent_thinking_time": 0.0,
+    "tool_execution_time": 8.653837180137634,
+    "llm_response_time": 20.19228675365448,
+    "steps_to_completion": 5,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 1.0,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 94.4375,
+    "cpu_usage_percent": 0.021052631578947368,
+    "steps_per_second": 0.17333351307357778,
+    "task_completion_accuracy": 0.6,
+    "output_quality_score": 0.8975,
+    "reasoning_coherence": 0.625,
+    "tool_usage_correctness": 1.0,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 1.0,
+    "error_recovery_effectiveness": 1.0,
+    "response_consistency": 0.8,
+    "system_stability": 1.0
+  },
+  "execution": {
+    "tools_used": [
+      "bash",
+      "write_file",
+      "read_file"
+    ],
+    "steps_taken": 5,
+    "success": 1.0,
+    "output_length": 6833
+  },
+  "performance": {
+    "overall_clear_score": 0.8824595013327599,
+    "passed_thresholds": false,
+    "dimension_scores": {
+      "cost": 0.97616,
+      "latency": 0.7596156338850657,
+      "efficiency": 0.9763906250000001,
+      "assurance": 0.780625,
+      "reliability": 0.95
+    }
+  },
+  "recommendations": [
+    "\u2705 Improve task completion - accuracy 0.60 below 0.7"
+  ],
+  "timestamp": 1772755965
+}

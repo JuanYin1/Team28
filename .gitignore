@@ -62,3 +62,6 @@ CLAUDE.md
 .agent_memory.json
 
 Mini-Agent/
+
+tool_call_mini_agent_evaluation_results/
+Before_adjust_tool_name_mini_agent_evaluation_results/

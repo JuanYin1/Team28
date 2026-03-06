@@ -24,6 +24,10 @@ https://github.com/MiniMax-AI/Mini-Agent
   python agentic_sys/enhanced_comprehensive_evaluation.py
 ```
   
+## Phase 2 - Enhanced Tool Call and Time Investigation
+```bash
+  python agentic_sys/mini_agent_clear_evaluation_system.py
+```
 ## What it does:
   - Runs 12 reasoning-enhanced test cases with real-time monitoring
   - Captures memory, CPU, disk, network metrics
