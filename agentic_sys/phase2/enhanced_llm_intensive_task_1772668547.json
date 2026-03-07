@@ -22,7 +22,7 @@
     "execution_score": 0.5,
     "passed": true,
     "confidence": 0.7999999999999999,
-    "reasoning": "Overall Score: 0.92 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.3)\n\u2022 Completeness: 1.00 (weight: 0.3)\n\u2022 Reasoning Quality: 0.80 (weight: 0.4)\n\u2022 Efficiency: 0.10 (weight: 0.0)\n\u2022 Execution: 0.50 (weight: 0.0)\n\nStrengths: Strong factual correctness, Excellent reasoning quality\nAreas for improvement: Slow execution performance\n\nConfidence: 0.80",
+    "reasoning": "Overall Score: 0.92 (PASS)\n\nComponent Breakdown:\n• Correctness: 1.00 (weight: 0.3)\n• Completeness: 1.00 (weight: 0.3)\n• Reasoning Quality: 0.80 (weight: 0.4)\n• Efficiency: 0.10 (weight: 0.0)\n• Execution: 0.50 (weight: 0.0)\n\nStrengths: Strong factual correctness, Excellent reasoning quality\nAreas for improvement: Slow execution performance\n\nConfidence: 0.80",
     "failed_criteria": [
       "efficiency",
       "execution_success"
@@ -47,9 +47,9 @@
     "total_network_mb": 1.3330078125,
     "avg_network_throughput_mbps": 0.008675523818127228,
     "network_pattern": "steady",
-    "process_peak_memory_mb": 0.0,
-    "process_avg_cpu": 0.0,
-    "process_thread_growth": 0,
+    "process_peak_memory_mb": null,
+    "process_avg_cpu": null,
+    "process_thread_growth": null,
     "primary_bottleneck": "memory",
     "bottleneck_confidence": 0.7994167776298265,
     "bottleneck_details": {
@@ -77,11 +77,13 @@
         "pattern": "steady"
       },
       "process_analysis": {
-        "peak_memory_mb": 0.0,
-        "avg_cpu_percent": 0.0,
-        "thread_growth": 0
+        "peak_memory_mb": null,
+        "avg_cpu_percent": null,
+        "thread_growth": null,
+        "metrics_available": false
       }
-    }
+    },
+    "process_metrics_available": false
   },
   "enhanced_analysis": {
     "overall_success": true,
@@ -91,5 +93,6 @@
     "llm_inference_pattern": "heavy",
     "tool_usage_intensity": "intensive",
     "reasoning_quality_category": "excellent"
-  }
+  },
+  "schema_version": "phase2.v2"
 }

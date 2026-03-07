@@ -24,7 +24,7 @@
     "cpu_usage_percent": 0.05454545454545455,
     "steps_per_second": 0.29919940925739197,
     "task_completion_accuracy": 1.0,
-    "output_quality_score": 1.05,
+    "output_quality_score": 1.0,
     "reasoning_coherence": 0.5,
     "tool_usage_correctness": 1.0,
     "skills_effectiveness": 0.0,
@@ -54,7 +54,10 @@
     }
   },
   "recommendations": [
-    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking"
+    "🧠 Enhance reasoning quality - improve step-by-step thinking"
   ],
-  "timestamp": 1772755912
+  "timestamp": 1772755912,
+  "schema_version": "phase3.v2",
+  "time_breakdown": {},
+  "step_resource_profiles": []
 }

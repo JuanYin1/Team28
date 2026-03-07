@@ -22,7 +22,7 @@
     "execution_score": 0.8,
     "passed": true,
     "confidence": 0.9999999999999999,
-    "reasoning": "Overall Score: 0.85 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.4)\n\u2022 Completeness: 1.00 (weight: 0.2)\n\u2022 Reasoning Quality: 0.62 (weight: 0.4)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 0.80 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\n\nConfidence: 1.00",
+    "reasoning": "Overall Score: 0.85 (PASS)\n\nComponent Breakdown:\n• Correctness: 1.00 (weight: 0.4)\n• Completeness: 1.00 (weight: 0.2)\n• Reasoning Quality: 0.62 (weight: 0.4)\n• Efficiency: 1.00 (weight: 0.0)\n• Execution: 0.80 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\n\nConfidence: 1.00",
     "failed_criteria": [],
     "evidence": null
   },
@@ -44,9 +44,9 @@
     "total_network_mb": 0.173828125,
     "avg_network_throughput_mbps": 0.010351411867933574,
     "network_pattern": "idle",
-    "process_peak_memory_mb": 0.0,
-    "process_avg_cpu": 0.0,
-    "process_thread_growth": 0,
+    "process_peak_memory_mb": null,
+    "process_avg_cpu": null,
+    "process_thread_growth": null,
     "primary_bottleneck": "memory",
     "bottleneck_confidence": 0.8387710843373496,
     "bottleneck_details": {
@@ -74,11 +74,13 @@
         "pattern": "idle"
       },
       "process_analysis": {
-        "peak_memory_mb": 0.0,
-        "avg_cpu_percent": 0.0,
-        "thread_growth": 0
+        "peak_memory_mb": null,
+        "avg_cpu_percent": null,
+        "thread_growth": null,
+        "metrics_available": false
       }
-    }
+    },
+    "process_metrics_available": false
   },
   "enhanced_analysis": {
     "overall_success": true,
@@ -88,5 +90,6 @@
     "llm_inference_pattern": "light",
     "tool_usage_intensity": "intensive",
     "reasoning_quality_category": "good"
-  }
+  },
+  "schema_version": "phase2.v2"
 }

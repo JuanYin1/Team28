@@ -54,8 +54,11 @@
     }
   },
   "recommendations": [
-    "\ud83d\udd27 Improve tool selection - accuracy 0.67",
-    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking"
+    "🔧 Improve tool selection - accuracy 0.67",
+    "🧠 Enhance reasoning quality - improve step-by-step thinking"
   ],
-  "timestamp": 1772755936
+  "timestamp": 1772755936,
+  "schema_version": "phase3.v2",
+  "time_breakdown": {},
+  "step_resource_profiles": []
 }

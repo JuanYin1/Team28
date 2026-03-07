@@ -136,39 +136,52 @@ class EnhancedMiniAgentEvaluator:
         with tempfile.TemporaryDirectory() as temp_workspace:
             
             # Start enhanced monitoring
-            monitor.start_monitoring("python")
+            monitor.start_monitoring("mini-agent")
             start_time = time.time()
             
             mini_agent_output = ""
             mini_agent_error = None
             execution_success = False
             
+            process = None
             try:
                 print(f"🔍 Starting real-time monitoring...")
                 print(f"🚀 Executing: mini-agent --workspace {temp_workspace} --task")
                 
-                # Execute Mini-Agent
-                process = subprocess.run([
+                # Execute Mini-Agent and attach monitor to the spawned PID.
+                process = subprocess.Popen([
                     "mini-agent",
                     "--workspace", temp_workspace,
                     "--task", test_case.task_prompt
-                ], 
-                capture_output=True,
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=test_case.max_time_seconds
+                encoding="utf-8",
+                errors="replace",
                 )
+                monitor.set_target_pid(process.pid)
+
+                stdout, stderr = process.communicate(timeout=test_case.max_time_seconds)
                 
                 end_time = time.time()
                 execution_time = end_time - start_time
                 
-                mini_agent_output = process.stdout
-                mini_agent_error = process.stderr if process.stderr else None
+                mini_agent_output = stdout or ""
+                mini_agent_error = stderr if stderr else None
                 execution_success = process.returncode == 0
                 
             except subprocess.TimeoutExpired:
+                if process is not None:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    mini_agent_output = stdout or ""
+                    if stderr:
+                        mini_agent_error = stderr
                 end_time = time.time()
                 execution_time = end_time - start_time
-                mini_agent_error = f"Test timed out after {test_case.max_time_seconds} seconds"
+                timeout_msg = f"Test timed out after {test_case.max_time_seconds} seconds"
+                mini_agent_error = f"{mini_agent_error}\n{timeout_msg}" if mini_agent_error else timeout_msg
                 execution_success = False
                 
             except Exception as e:
@@ -227,9 +240,10 @@ class EnhancedMiniAgentEvaluator:
         
         # Tool Usage Intensity
         disk_network_total = perf_analysis.total_disk_read_mb + perf_analysis.total_disk_write_mb + perf_analysis.total_network_mb
-        if disk_network_total > 10:  # >10MB of I/O
+        io_rate_mb_s = disk_network_total / max(perf_analysis.monitoring_duration, 1.0)
+        if io_rate_mb_s > 5.0:  # sustained heavy I/O
             tool_intensity = "intensive"
-        elif disk_network_total > 1:
+        elif io_rate_mb_s > 0.5:
             tool_intensity = "moderate"
         else:
             tool_intensity = "minimal"
@@ -271,6 +285,7 @@ class EnhancedMiniAgentEvaluator:
         
         # Create comprehensive result data
         result_data = {
+            "schema_version": "phase2.v2",
             "test_info": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,

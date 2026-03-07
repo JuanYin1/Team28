@@ -13,6 +13,7 @@ This integrates:
 
 import asyncio
 import json
+import re
 import subprocess
 import tempfile
 import time
@@ -256,6 +257,8 @@ Provide reasoning for each recommendation.""",
                 ], 
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=test_case.max_time_seconds
                 )
                 
@@ -349,7 +352,14 @@ Provide reasoning for each recommendation.""",
         filepath = self.results_dir / filename
         
         # Convert to JSON-serializable format
+        preview = result.mini_agent_output
+        # Remove ANSI control sequences and truncate for compact, portable artifacts.
+        preview = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", preview)
+        if len(preview) > 500:
+            preview = preview[:500] + "..."
+
         result_dict = {
+            "schema_version": "phase1.v2",
             "test_case": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,
@@ -363,7 +373,7 @@ Provide reasoning for each recommendation.""",
                 "execution_success": result.execution_success,
                 "mini_agent_error": result.mini_agent_error,
                 "output_length": len(result.mini_agent_output),
-                "output_preview": result.mini_agent_output + "..." if len(result.mini_agent_output) > 500 else result.mini_agent_output
+                "output_preview": preview
             },
             "evaluation": {
                 "overall_score": result.evaluation_result.overall_score,
@@ -483,31 +493,35 @@ This report presents a comprehensive evaluation of Mini-Agent using research-gra
 
 ### Strengths Identified:
 """
-        
-        # Identify strengths
+        strengths: List[str] = []
         if avg_correctness >= 0.7:
-            report += "- ✅ **Strong factual accuracy** - Mini-Agent provides correct answers consistently\n"
+            strengths.append("✅ **Strong factual accuracy** - Mini-Agent provides correct answers consistently")
         if avg_reasoning >= 0.6:
-            report += "- ✅ **Good reasoning demonstration** - Shows step-by-step thinking process\n"
+            strengths.append("✅ **Good reasoning demonstration** - Shows step-by-step thinking process")
         if avg_execution_time <= 60:
-            report += "- ✅ **Efficient execution** - Completes tasks within reasonable time limits\n"
+            strengths.append("✅ **Efficient execution** - Completes tasks within reasonable time limits")
         if execution_success_count / total_tests >= 0.8:
-            report += "- ✅ **Reliable execution** - Low failure rate for technical operations\n"
+            strengths.append("✅ **Reliable execution** - Low failure rate for technical operations")
+        if not strengths:
+            strengths.append("(none)")
+        report += "\n".join(f"- {item}" for item in strengths) + "\n"
         
         report += f"""
 
 ### Areas for Improvement:
 """
-        
-        # Identify weaknesses
+        improvements: List[str] = []
         if avg_correctness < 0.6:
-            report += "- ⚠️ **Factual accuracy needs improvement** - Focus on knowledge base and reasoning\n"
+            improvements.append("⚠️ **Factual accuracy needs improvement** - Focus on knowledge base and reasoning")
         if avg_reasoning < 0.5:
-            report += "- ⚠️ **Reasoning quality could be enhanced** - Encourage more explicit step-by-step thinking\n"
+            improvements.append("⚠️ **Reasoning quality could be enhanced** - Encourage more explicit step-by-step thinking")
         if avg_completeness < 0.6:
-            report += "- ⚠️ **Task completeness issues** - Ensure all parts of complex tasks are addressed\n"
+            improvements.append("⚠️ **Task completeness issues** - Ensure all parts of complex tasks are addressed")
         if execution_success_count / total_tests < 0.8:
-            report += "- ⚠️ **Execution reliability concerns** - Investigate technical failures and timeouts\n"
+            improvements.append("⚠️ **Execution reliability concerns** - Investigate technical failures and timeouts")
+        if not improvements:
+            improvements.append("(none)")
+        report += "\n".join(f"- {item}" for item in improvements) + "\n"
         
         report += f"""
 

@@ -43,6 +43,7 @@ EVENT_COLORS = {
     "thinking":           "#4A90D9",
     "assistant_response": "#7B68EE",
     "tool_call":          "#F5A623",
+    "tool_result":        "#52C41A",
     "success":            "#52C41A",
     "error":              "#D0021B",
     "init":               "#AAAAAA",
@@ -64,6 +65,7 @@ MARKER_MAP = {
     "thinking":           "D",
     "assistant_response": "s",
     "tool_call":          "^",
+    "tool_result":        "o",
     "success":            "o",
     "error":              "X",
     "init":               ".",
@@ -135,8 +137,9 @@ def _step_spans(profiles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         think_t   = min(by_type.get("thinking",           [step_start]))
         resp_t    = min(by_type.get("assistant_response", [think_t]))
         success_t = max(
-            by_type.get("success",   [resp_t]) +
-            by_type.get("tool_call", [resp_t])
+            by_type.get("tool_result", [resp_t]) +
+            by_type.get("success",     [resp_t]) +  # backward compatibility
+            by_type.get("tool_call",   [resp_t])
         )
 
         if resp_t > think_t:
@@ -456,8 +459,9 @@ def plot_step_duration_breakdown(ax: plt.Axes, result: Dict[str, Any]) -> None:
         think_t   = min(by_type.get("thinking",           [step_start]))
         resp_t    = min(by_type.get("assistant_response", [think_t]))
         success_t = max(
-            by_type.get("success",   [resp_t]) +
-            by_type.get("tool_call", [resp_t])
+            by_type.get("tool_result", [resp_t]) +
+            by_type.get("success",     [resp_t]) +  # backward compatibility
+            by_type.get("tool_call",   [resp_t])
         )
 
         step_labels.append("Step %d" % sn)
@@ -693,7 +697,13 @@ def main() -> None:
         generate_dashboard(result, out_path)
 
     if len(results) > 1:
-        comp_path = Path(args.results_dir) / "comparison_dashboard.png"
+        if args.files:
+            parent_dirs = {Path(p).parent.resolve() for p in paths if Path(p).exists()}
+            comp_dir = parent_dirs.pop() if len(parent_dirs) == 1 else Path.cwd()
+        else:
+            comp_dir = Path(args.results_dir)
+        comp_dir.mkdir(parents=True, exist_ok=True)
+        comp_path = comp_dir / "comparison_dashboard.png"
         print("\n  Generating comparison dashboard for %d results..." % len(results))
         generate_comparison(results, labels, comp_path)
 

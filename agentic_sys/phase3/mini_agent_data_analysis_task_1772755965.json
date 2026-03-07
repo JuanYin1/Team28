@@ -55,7 +55,10 @@
     }
   },
   "recommendations": [
-    "\u2705 Improve task completion - accuracy 0.60 below 0.7"
+    "✅ Improve task completion - accuracy 0.60 below 0.7"
   ],
-  "timestamp": 1772755965
+  "timestamp": 1772755965,
+  "schema_version": "phase3.v2",
+  "time_breakdown": {},
+  "step_resource_profiles": []
 }

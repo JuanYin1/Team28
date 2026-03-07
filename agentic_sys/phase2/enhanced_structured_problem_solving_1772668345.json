@@ -22,7 +22,7 @@
     "execution_score": 1.0,
     "passed": false,
     "confidence": 0.7,
-    "reasoning": "Overall Score: 0.53 (FAIL)\n\nComponent Breakdown:\n\u2022 Correctness: 0.90 (weight: 0.2)\n\u2022 Completeness: 0.44 (weight: 0.2)\n\u2022 Reasoning Quality: 0.40 (weight: 0.6)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 1.00 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\nAreas for improvement: Weak reasoning demonstration\n\nConfidence: 0.70",
+    "reasoning": "Overall Score: 0.53 (FAIL)\n\nComponent Breakdown:\n• Correctness: 0.90 (weight: 0.2)\n• Completeness: 0.44 (weight: 0.2)\n• Reasoning Quality: 0.40 (weight: 0.6)\n• Efficiency: 1.00 (weight: 0.0)\n• Execution: 1.00 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\nAreas for improvement: Weak reasoning demonstration\n\nConfidence: 0.70",
     "failed_criteria": [
       "completeness",
       "reasoning_quality"
@@ -47,9 +47,9 @@
     "total_network_mb": 0.1708984375,
     "avg_network_throughput_mbps": 0.018985355134602276,
     "network_pattern": "idle",
-    "process_peak_memory_mb": 0.0,
-    "process_avg_cpu": 0.0,
-    "process_thread_growth": 0,
+    "process_peak_memory_mb": null,
+    "process_avg_cpu": null,
+    "process_thread_growth": null,
     "primary_bottleneck": "memory",
     "bottleneck_confidence": 0.8119333333333336,
     "bottleneck_details": {
@@ -77,11 +77,13 @@
         "pattern": "idle"
       },
       "process_analysis": {
-        "peak_memory_mb": 0.0,
-        "avg_cpu_percent": 0.0,
-        "thread_growth": 0
+        "peak_memory_mb": null,
+        "avg_cpu_percent": null,
+        "thread_growth": null,
+        "metrics_available": false
       }
-    }
+    },
+    "process_metrics_available": false
   },
   "enhanced_analysis": {
     "overall_success": false,
@@ -91,5 +93,6 @@
     "llm_inference_pattern": "light",
     "tool_usage_intensity": "intensive",
     "reasoning_quality_category": "fair"
-  }
+  },
+  "schema_version": "phase2.v2"
 }

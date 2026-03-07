@@ -55,7 +55,10 @@
     }
   },
   "recommendations": [
-    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking"
+    "🧠 Enhance reasoning quality - improve step-by-step thinking"
   ],
-  "timestamp": 1772755981
+  "timestamp": 1772755981,
+  "schema_version": "phase3.v2",
+  "time_breakdown": {},
+  "step_resource_profiles": []
 }

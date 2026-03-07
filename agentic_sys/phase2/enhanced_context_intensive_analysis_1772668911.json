@@ -22,7 +22,7 @@
     "execution_score": 0.8,
     "passed": false,
     "confidence": 0.7999999999999999,
-    "reasoning": "Overall Score: 0.00 (FAIL)\n\nComponent Breakdown:\n\u2022 Correctness: 0.00 (weight: 0.3)\n\u2022 Completeness: 0.00 (weight: 0.3)\n\u2022 Reasoning Quality: 0.00 (weight: 0.4)\n\u2022 Efficiency: 0.10 (weight: 0.0)\n\u2022 Execution: 0.80 (weight: 0.0)\n\nAreas for improvement: Poor factual accuracy, Weak reasoning demonstration, Slow execution performance\n\nConfidence: 0.80",
+    "reasoning": "Overall Score: 0.00 (FAIL)\n\nComponent Breakdown:\n• Correctness: 0.00 (weight: 0.3)\n• Completeness: 0.00 (weight: 0.3)\n• Reasoning Quality: 0.00 (weight: 0.4)\n• Efficiency: 0.10 (weight: 0.0)\n• Execution: 0.80 (weight: 0.0)\n\nAreas for improvement: Poor factual accuracy, Weak reasoning demonstration, Slow execution performance\n\nConfidence: 0.80",
     "failed_criteria": [
       "correctness",
       "completeness",
@@ -49,9 +49,9 @@
     "total_network_mb": 2.6845703125,
     "avg_network_throughput_mbps": 0.008953566577220861,
     "network_pattern": "bursty",
-    "process_peak_memory_mb": 0.0,
-    "process_avg_cpu": 0.0,
-    "process_thread_growth": 0,
+    "process_peak_memory_mb": null,
+    "process_avg_cpu": null,
+    "process_thread_growth": null,
     "primary_bottleneck": "memory",
     "bottleneck_confidence": 0.7717646657571551,
     "bottleneck_details": {
@@ -79,11 +79,13 @@
         "pattern": "bursty"
       },
       "process_analysis": {
-        "peak_memory_mb": 0.0,
-        "avg_cpu_percent": 0.0,
-        "thread_growth": 0
+        "peak_memory_mb": null,
+        "avg_cpu_percent": null,
+        "thread_growth": null,
+        "metrics_available": false
       }
-    }
+    },
+    "process_metrics_available": false
   },
   "enhanced_analysis": {
     "overall_success": false,
@@ -93,5 +95,6 @@
     "llm_inference_pattern": "heavy",
     "tool_usage_intensity": "intensive",
     "reasoning_quality_category": "poor"
-  }
+  },
+  "schema_version": "phase2.v2"
 }

@@ -147,14 +147,29 @@ class AdvancedEvaluator:
             agent_response, workspace_path, criteria
         )
         
-        # Calculate weighted overall score
-        result.overall_score = (
-            result.correctness_score * criteria.correctness_weight +
-            result.completeness_score * criteria.completeness_weight +
-            result.reasoning_score * criteria.reasoning_weight +
-            result.efficiency_score * criteria.efficiency_weight +
-            result.execution_score * criteria.execution_weight
-        )
+        # Clamp component scores defensively in case upstream heuristics overshoot.
+        result.correctness_score = self._clamp_score(result.correctness_score)
+        result.completeness_score = self._clamp_score(result.completeness_score)
+        result.reasoning_score = self._clamp_score(result.reasoning_score)
+        result.efficiency_score = self._clamp_score(result.efficiency_score)
+        result.execution_score = self._clamp_score(result.execution_score)
+
+        # Calculate weighted overall score using normalized weights.
+        # This guarantees a 0-1 output even when callers pass weights that do not sum to 1.0.
+        weighted_scores = [
+            (result.correctness_score, max(0.0, criteria.correctness_weight)),
+            (result.completeness_score, max(0.0, criteria.completeness_weight)),
+            (result.reasoning_score, max(0.0, criteria.reasoning_weight)),
+            (result.efficiency_score, max(0.0, criteria.efficiency_weight)),
+            (result.execution_score, max(0.0, criteria.execution_weight)),
+        ]
+        total_weight = sum(weight for _, weight in weighted_scores)
+        if total_weight == 0.0:
+            total_weight = float(len(weighted_scores))
+            weighted_scores = [(score, 1.0) for score, _ in weighted_scores]
+
+        overall_raw = sum(score * weight for score, weight in weighted_scores) / total_weight
+        result.overall_score = self._clamp_score(overall_raw)
         
         # Determine pass/fail
         result.passed = result.overall_score >= result.pass_threshold
@@ -167,6 +182,13 @@ class AdvancedEvaluator:
         result.failed_criteria = self._identify_failed_criteria(result, criteria)
         
         return result
+
+    @staticmethod
+    def _clamp_score(value: float) -> float:
+        """Clamp numeric score-like values to [0.0, 1.0]."""
+        if value is None:
+            return 0.0
+        return max(0.0, min(1.0, float(value)))
     
     def _evaluate_correctness(self, task_prompt: str, response: str, criteria: EvaluationCriteria) -> float:
         """

@@ -1,0 +1,34 @@
+{
+  "schema_version": "phase1.v2",
+  "test_case": {
+    "name": "logic_puzzle",
+    "category": "reasoning",
+    "complexity": "medium",
+    "description": "Multi-step logic puzzle requiring systematic reasoning",
+    "task_prompt": "Solve this logic puzzle step by step:\n\nThree friends (Alex, Blake, Casey) each own a different pet (cat, dog, bird) and prefer different colors (red, blue, green).\n\nClues:\n1. Alex doesn't like red\n2. The person with the cat likes blue  \n3. Blake has a dog\n4. Casey doesn't like green\n5. The person who likes red has a bird\n\nWho has which pet and likes which color?",
+    "max_time_seconds": 90
+  },
+  "execution": {
+    "total_execution_time": 22.874895095825195,
+    "execution_success": true,
+    "mini_agent_error": null,
+    "output_length": 4918,
+    "output_preview": "\u2705 LLM retry mechanism enabled (max 3 retries)\n\u2705 Loaded Bash Output tool\n\u2705 Loaded Bash Kill tool\nLoading Claude Skills...\n\u2705 Discovered 15 Claude Skills\n\u2705 Loaded Skill tool (get_skill)\nLoading MCP tools...\n  MCP timeouts: connect=10.0s, execute=60.0s, sse_read=120.0s\nSkipping disabled server: minimax_search\nSkipping disabled server: memory\n\nTotal MCP tools loaded: 0\n\u26a0\ufe0f  No available MCP tools found\n\n\u2705 Loaded Bash tool (cwd: /var/folders/5w/47tgrsy534l2m0mv646lpb4w0000gn/T/tmphw796szs)\n\u2705 Loaded fil..."
+  },
+  "evaluation": {
+    "overall_score": 0.8500000000000001,
+    "passed": true,
+    "confidence": 0.9999999999999999,
+    "correctness_score": 1.0,
+    "completeness_score": 1.0,
+    "reasoning_score": 0.625,
+    "efficiency_score": 1.0,
+    "execution_score": 0.8,
+    "failed_criteria": [],
+    "detailed_reasoning": "Overall Score: 0.85 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.4)\n\u2022 Completeness: 1.00 (weight: 0.2)\n\u2022 Reasoning Quality: 0.62 (weight: 0.4)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 0.80 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\n\nConfidence: 1.00"
+  },
+  "summary": {
+    "overall_success": true,
+    "confidence_score": 0.9999999999999999
+  }
+}
