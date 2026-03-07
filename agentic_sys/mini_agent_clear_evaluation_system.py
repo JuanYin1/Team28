@@ -161,6 +161,22 @@ class MiniAgentEvaluationResult:
     failed_criteria: List[str] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
 
+    # Execution time breakdown: LLM inference / tool calls / coordination
+    time_breakdown: Dict[str, Any] = field(default_factory=dict)
+
+    # Per-step resource attribution correlated from timeline + monitor snapshots
+    step_resource_profiles: List[Dict[str, Any]] = field(default_factory=list)
+
+@dataclass
+class StepResourceProfile:
+    """Resource usage snapshot correlated to a specific agent timeline event"""
+    step: Optional[int]
+    event_type: str           # "thinking", "tool_call", "assistant_response", "error", "success"
+    time_offset_s: float      # seconds elapsed from task start when this event occurred (estimated)
+    cpu_percent: float
+    memory_mb: float
+
+
 class MiniAgentResourceMonitor:
     """Resource monitoring specifically for Mini-Agent execution"""
     
@@ -171,6 +187,8 @@ class MiniAgentResourceMonitor:
         self.cpu_samples = []
         self.mini_agent_process = None
         self.monitor_thread = None
+        # Timestamped snapshots: List of (abs_timestamp, memory_mb, cpu_pct)
+        self.snapshots: List[Tuple[float, float, float]] = []
         
     def start_monitoring(self):
         """Start monitoring mini-agent process resources"""
@@ -178,42 +196,54 @@ class MiniAgentResourceMonitor:
         self.start_time = time.time()
         self.peak_memory = 0.0
         self.cpu_samples = []
+        self.snapshots = []
         
         def monitor_loop():
             while self.monitoring:
                 try:
+                    ts = time.time()
+                    memory_mb = 0.0
+                    cpu_pct = 0.0
+
                     if PSUTIL_AVAILABLE:
-                        # Find mini-agent processes
-                        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
-                            if proc.info['name'] and 'mini-agent' in proc.info['name'].lower():
-                                self.mini_agent_process = proc
-                                break
-                            if proc.info['cmdline'] and any('mini-agent' in cmd for cmd in proc.info['cmdline']):
-                                self.mini_agent_process = proc
-                                break
-                        
+                        # Try to find the mini-agent process; fall back to system-wide metrics
+                        if self.mini_agent_process is None:
+                            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                                try:
+                                    name = proc.info.get('name') or ''
+                                    cmdline = ' '.join(proc.info.get('cmdline') or [])
+                                    if 'mini-agent' in name.lower() or 'mini_agent' in cmdline.lower():
+                                        self.mini_agent_process = psutil.Process(proc.info['pid'])
+                                        break
+                                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                    continue
+
                         if self.mini_agent_process:
                             try:
                                 memory_mb = self.mini_agent_process.memory_info().rss / 1024 / 1024
-                                self.peak_memory = max(self.peak_memory, memory_mb)
-                                
-                                cpu_percent = self.mini_agent_process.cpu_percent()
-                                self.cpu_samples.append(cpu_percent)
-                            except psutil.NoSuchProcess:
-                                pass
-                    else:
-                        # Fallback monitoring without psutil
-                        self.cpu_samples.append(50.0)  # Placeholder value
-                    
+                                cpu_pct = self.mini_agent_process.cpu_percent()
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                self.mini_agent_process = None
+
+                        # Fall back to system-wide memory if process not found
+                        if memory_mb == 0.0:
+                            mem = psutil.virtual_memory()
+                            memory_mb = mem.used / 1024 / 1024
+                            cpu_pct = psutil.cpu_percent()
+
+                    self.peak_memory = max(self.peak_memory, memory_mb)
+                    self.cpu_samples.append(cpu_pct)
+                    self.snapshots.append((ts, memory_mb, cpu_pct))
+
                     time.sleep(0.5)
-                except:
+                except Exception:
                     pass
                     
         self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
         self.monitor_thread.start()
     
     def stop_monitoring(self) -> Tuple[float, float, float]:
-        """Stop monitoring and return metrics"""
+        """Stop monitoring and return (duration, peak_memory_mb, avg_cpu_pct)"""
         self.monitoring = False
         if self.monitor_thread:
             self.monitor_thread.join(timeout=1.0)
@@ -222,6 +252,13 @@ class MiniAgentResourceMonitor:
         avg_cpu = sum(self.cpu_samples) / len(self.cpu_samples) if self.cpu_samples else 0.0
         
         return duration, self.peak_memory, avg_cpu
+
+    def get_resource_at(self, abs_timestamp: float) -> Tuple[float, float]:
+        """Return (memory_mb, cpu_pct) from the snapshot closest to abs_timestamp"""
+        if not self.snapshots:
+            return (0.0, 0.0)
+        closest = min(self.snapshots, key=lambda s: abs(s[0] - abs_timestamp))
+        return (closest[1], closest[2])
 
 class MiniAgentLogAnalyzer:
     """Enhanced Mini-Agent log analyzer with multiple detection methods and log file access"""
@@ -492,22 +529,49 @@ class MiniAgentCLEAREvaluator:
         
         # Auto-detect mini-agent path
         if mini_agent_path is None:
-            # Try to find mini-agent executable
+            import sys, shutil
             possible_paths = [
+                # Windows conda env (common Miniconda/Anaconda locations)
+                r"D:\Apps\Miniconda\envs\mini-agent\Scripts\mini-agent.exe",
+                r"C:\ProgramData\Miniconda3\envs\mini-agent\Scripts\mini-agent.exe",
+                r"C:\Users\Hanne\Miniconda3\envs\mini-agent\Scripts\mini-agent.exe",
+                # macOS / Linux venv (kept for cross-platform compat)
                 "/Users/ria/Downloads/UCSD/CSE291P/Team28/Mini-Agent/.venv/bin/mini-agent",
                 "./Mini-Agent/.venv/bin/mini-agent",
-                "mini-agent"  # Global installation
             ]
-            
+
+            found = None
+            # 1. Check explicit paths
             for path in possible_paths:
-                if Path(path).exists() or subprocess.run(["which", path], 
-                                                       capture_output=True).returncode == 0:
-                    self.mini_agent_path = path
+                if Path(path).exists():
+                    found = path
                     break
-            else:
-                raise RuntimeError("Could not find mini-agent executable. Please specify mini_agent_path.")
+
+            # 2. Check PATH (works if conda env is activated)
+            if found is None:
+                found = shutil.which("mini-agent")
+
+            # 3. Try conda run as fallback (works without activating env)
+            if found is None:
+                test = subprocess.run(
+                    ["conda", "run", "-n", "mini-agent", "mini-agent", "--version"],
+                    capture_output=True, text=True
+                )
+                if test.returncode == 0:
+                    found = "__conda_run__"  # special sentinel
+
+            if found is None:
+                raise RuntimeError(
+                    "Could not find mini-agent executable. "
+                    "Run: conda activate mini-agent  then re-run, "
+                    "or pass mini_agent_path= explicitly."
+                )
+
+            self.mini_agent_path = found
+            self._use_conda_run = (found == "__conda_run__")
         else:
             self.mini_agent_path = mini_agent_path
+            self._use_conda_run = False
             
         # Initialize components
         self.advanced_evaluator = AdvancedEvaluator(use_llm_judge=False)
@@ -692,18 +756,31 @@ Please show me the complete process including testing.""",
         try:
             with tempfile.TemporaryDirectory() as temp_workspace:
                 
-                logger.info(f"Executing: {self.mini_agent_path} --workspace {temp_workspace} --task")
-                
+                if getattr(self, "_use_conda_run", False):
+                    cmd = [
+                        "conda", "run", "-n", "mini-agent", "mini-agent",
+                        "--workspace", temp_workspace,
+                        "--task", test_case.task_prompt,
+                    ]
+                else:
+                    cmd = [
+                        self.mini_agent_path,
+                        "--workspace", temp_workspace,
+                        "--task", test_case.task_prompt,
+                    ]
+
+                logger.info(f"Executing: {' '.join(cmd[:4])} ...")
+
                 # Execute mini-agent with task
-                process = subprocess.run([
-                    self.mini_agent_path,
-                    "--workspace", temp_workspace,
-                    "--task", test_case.task_prompt
-                ], 
-                capture_output=True,
-                text=True,
-                timeout=test_case.evaluation_criteria.max_task_time_seconds,
-                cwd=temp_workspace
+                # Use utf-8 + replace to handle emoji/Unicode output on Windows (avoids cp1252 UnicodeDecodeError)
+                process = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=test_case.evaluation_criteria.max_task_time_seconds,
+                    cwd=temp_workspace,
                 )
                 
                 execution_time = time.time() - start_time
@@ -746,13 +823,18 @@ Please show me the complete process including testing.""",
         self.resource_monitor.start_monitoring()
         
         try:
-            # Execute Mini-Agent task
-            start_time = time.time()
+            # Execute Mini-Agent task — record wall-clock start for correlation later
+            task_start_time = time.time()
             stdout, stderr, success, execution_time = await self.execute_mini_agent_task(test_case)
+            start_time = task_start_time  # alias kept for any existing references below
             
             # Stop resource monitoring
             _, peak_memory, avg_cpu = self.resource_monitor.stop_monitoring()
             
+            # Defensive: ensure stdout/stderr are always strings (guards against subprocess edge cases)
+            stdout = stdout or ""
+            stderr = stderr or ""
+
             # Analyze execution logs with enhanced detection
             log_analysis = self.log_analyzer.analyze_execution_log(stdout + "\n" + stderr)
             
@@ -779,14 +861,12 @@ Please show me the complete process including testing.""",
             # Latency Dimension
             clear_metrics.total_task_time = execution_time
             clear_metrics.steps_to_completion = log_analysis["total_steps"]
-            
-            # Use actual tool timing data if available
-            if log_analysis["tool_timings"]:
-                clear_metrics.tool_execution_time = sum(t["estimated_duration"] for t in log_analysis["tool_timings"])
-                clear_metrics.llm_response_time = execution_time - clear_metrics.tool_execution_time
-            else:
-                clear_metrics.tool_execution_time = execution_time * 0.3  # Fallback estimate
-                clear_metrics.llm_response_time = execution_time * 0.7  # Fallback estimate
+
+            # Compute time breakdown using timeline-weighted method (replaces hardcoded 70/30)
+            time_breakdown = self._calculate_time_breakdown(log_analysis, execution_time)
+            clear_metrics.tool_execution_time = time_breakdown["tool_execution_s"]
+            clear_metrics.llm_response_time = time_breakdown["llm_inference_s"]
+            clear_metrics.agent_thinking_time = time_breakdown["llm_inference_s"]  # same concept
             
             # Efficiency Dimension
             clear_metrics.memory_usage_mb = peak_memory
@@ -856,6 +936,11 @@ Please show me the complete process including testing.""",
             # Generate recommendations
             recommendations = self._generate_mini_agent_recommendations(clear_metrics, test_case.evaluation_criteria)
             
+            # Per-step resource attribution
+            step_resource_profiles = self._build_step_resource_profiles(
+                log_analysis, task_start_time, execution_time, self.resource_monitor
+            )
+
             # Create result
             result = MiniAgentEvaluationResult(
                 test_case=test_case,
@@ -870,7 +955,9 @@ Please show me the complete process including testing.""",
                 passed_all_thresholds=passed_thresholds,
                 confidence_score=evaluation_result.confidence,
                 dimension_scores=dimension_scores,
-                recommendations=recommendations
+                recommendations=recommendations,
+                time_breakdown=time_breakdown,
+                step_resource_profiles=step_resource_profiles,
             )
             
             return result
@@ -1021,7 +1108,103 @@ Please show me the complete process including testing.""",
             recommendations.append("✨ Excellent performance across all dimensions!")
         
         return recommendations
-    
+
+    def _calculate_time_breakdown(self, log_analysis: Dict[str, Any], execution_time: float) -> Dict[str, Any]:
+        """
+        Compute LLM inference / tool execution / coordination time split.
+
+        Strategy: each event in the detailed_timeline is assigned a 'weight' based on
+        its type. Weights reflect typical duration profiles:
+          - thinking / assistant_response  → weight 3  (API round-trip dominates)
+          - tool_call / success            → weight 1  (local or fast shell ops)
+          - coordination (step markers,
+            errors, etc.)                 → weight 0.5 (bookkeeping overhead)
+
+        The fraction of total weight for each category becomes the fraction of time.
+        Falls back to a fixed 70/20/10 estimate if no timeline is available.
+        """
+        timeline = log_analysis.get("detailed_timeline", [])
+
+        LLM_TYPES = {"thinking", "assistant_response"}
+        TOOL_TYPES = {"tool_call", "success"}
+
+        if not timeline:
+            llm_s = round(execution_time * 0.70, 2)
+            tool_s = round(execution_time * 0.20, 2)
+            coord_s = round(execution_time * 0.10, 2)
+            return {
+                "llm_inference_s": llm_s,
+                "tool_execution_s": tool_s,
+                "coordination_s": coord_s,
+                "llm_inference_pct": 70.0,
+                "tool_execution_pct": 20.0,
+                "coordination_pct": 10.0,
+                "method": "fixed_estimate (no timeline)",
+            }
+
+        llm_w = sum(3 for e in timeline if e["event_type"] in LLM_TYPES)
+        tool_w = sum(1 for e in timeline if e["event_type"] in TOOL_TYPES)
+        coord_w = sum(0.5 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES)
+        coord_w += 1.0  # baseline so coordination is never zero
+
+        total_w = llm_w + tool_w + coord_w or 1.0
+
+        llm_s = round(execution_time * llm_w / total_w, 2)
+        tool_s = round(execution_time * tool_w / total_w, 2)
+        coord_s = round(execution_time - llm_s - tool_s, 2)  # absorb rounding error
+
+        return {
+            "llm_inference_s": llm_s,
+            "tool_execution_s": tool_s,
+            "coordination_s": coord_s,
+            "llm_inference_pct": round(100 * llm_s / execution_time, 1) if execution_time else 0.0,
+            "tool_execution_pct": round(100 * tool_s / execution_time, 1) if execution_time else 0.0,
+            "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
+            "method": "timeline_weighted",
+            "llm_events": sum(1 for e in timeline if e["event_type"] in LLM_TYPES),
+            "tool_events": sum(1 for e in timeline if e["event_type"] in TOOL_TYPES),
+            "coord_events": sum(1 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES),
+        }
+
+    def _build_step_resource_profiles(
+        self,
+        log_analysis: Dict[str, Any],
+        task_start_time: float,
+        execution_time: float,
+        resource_monitor: "MiniAgentResourceMonitor",
+    ) -> List[Dict[str, Any]]:
+        """
+        Correlate each timeline event with the closest resource snapshot.
+
+        Event line numbers are used to linearly interpolate a wall-clock timestamp:
+            event_abs_time = task_start_time + (line / max_line) * execution_time
+
+        The resource monitor's snapshot list is then searched for the nearest sample.
+        """
+        timeline = log_analysis.get("detailed_timeline", [])
+        if not timeline:
+            return []
+
+        max_line = max((e.get("line", 0) for e in timeline), default=1) or 1
+        profiles = []
+
+        for event in timeline:
+            line_num = event.get("line", 0)
+            time_offset = (line_num / max_line) * execution_time
+            abs_ts = task_start_time + time_offset
+
+            memory_mb, cpu_pct = resource_monitor.get_resource_at(abs_ts)
+
+            profiles.append({
+                "step": event.get("step"),
+                "event_type": event["event_type"],
+                "time_offset_s": round(time_offset, 2),
+                "cpu_percent": round(cpu_pct, 1),
+                "memory_mb": round(memory_mb, 1),
+            })
+
+        return profiles
+
     async def run_comprehensive_mini_agent_evaluation(self) -> List[MiniAgentEvaluationResult]:
         """Run comprehensive Mini-Agent evaluation with CLEAR Framework"""
         
@@ -1081,6 +1264,10 @@ Please show me the complete process including testing.""",
                 "passed_thresholds": result.passed_all_thresholds,
                 "dimension_scores": result.dimension_scores
             },
+            # ── NEW: execution-time breakdown and per-step resource attribution ──
+            "time_breakdown": result.time_breakdown,
+            "step_resource_profiles": result.step_resource_profiles,
+            # ─────────────────────────────────────────────────────────────────────
             "recommendations": result.recommendations,
             "timestamp": timestamp
         }
@@ -1104,6 +1291,14 @@ Please show me the complete process including testing.""",
         avg_time = sum(r.clear_metrics.total_task_time for r in results) / total_tests
         avg_steps = sum(r.clear_metrics.steps_to_completion for r in results) / total_tests
         avg_accuracy = sum(r.clear_metrics.task_completion_accuracy for r in results) / total_tests
+
+        # Aggregate time breakdown across all results
+        avg_llm_s   = sum(r.time_breakdown.get("llm_inference_s", 0)   for r in results) / total_tests
+        avg_tool_s  = sum(r.time_breakdown.get("tool_execution_s", 0)  for r in results) / total_tests
+        avg_coord_s = sum(r.time_breakdown.get("coordination_s", 0)    for r in results) / total_tests
+        avg_llm_pct   = round(100 * avg_llm_s   / avg_time, 1) if avg_time else 0
+        avg_tool_pct  = round(100 * avg_tool_s  / avg_time, 1) if avg_time else 0
+        avg_coord_pct = round(100 * avg_coord_s / avg_time, 1) if avg_time else 0
         
         # Generate comprehensive report
         report = f"""# Mini-Agent CLEAR Framework Evaluation Report
@@ -1165,7 +1360,73 @@ This report presents comprehensive evaluation results for the Mini-Agent system 
             tools_str = ", ".join(result.tools_used[:3]) + ("..." if len(result.tools_used) > 3 else "")
             
             report += f"| {result.test_case.name} | {result.test_case.category} | {result.overall_clear_score:.3f} | ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s | {result.clear_metrics.steps_to_completion} | {tools_str} | {status} |\n"
-        
+
+        # ── Execution Time Breakdown ──────────────────────────────────────────
+        report += f"""
+---
+
+## ⏱️ Execution Time Breakdown
+
+> Time is partitioned into three phases using timeline-weighted analysis
+> (method: `{results[0].time_breakdown.get("method", "n/a") if results else "n/a"}`).
+> LLM inference events are weighted 3× relative to tool calls, reflecting API round-trip latency.
+
+### Aggregate (across all tasks)
+
+| Phase | Avg Time (s) | Avg % of Total |
+|-------|-------------|----------------|
+| 🧠 LLM Inference | {avg_llm_s:.2f}s | {avg_llm_pct}% |
+| 🔧 Tool Execution | {avg_tool_s:.2f}s | {avg_tool_pct}% |
+| 🔄 Coordination | {avg_coord_s:.2f}s | {avg_coord_pct}% |
+| **Total** | **{avg_time:.2f}s** | **100%** |
+
+### Per-Task Breakdown
+
+| Test Case | LLM (s) | LLM % | Tool (s) | Tool % | Coord (s) | Coord % | Total (s) |
+|-----------|---------|-------|----------|--------|-----------|---------|-----------|
+"""
+        for result in results:
+            bd = result.time_breakdown
+            total = result.clear_metrics.total_task_time
+            report += (
+                f"| {result.test_case.name} "
+                f"| {bd.get('llm_inference_s', 0):.2f} "
+                f"| {bd.get('llm_inference_pct', 0)}% "
+                f"| {bd.get('tool_execution_s', 0):.2f} "
+                f"| {bd.get('tool_execution_pct', 0)}% "
+                f"| {bd.get('coordination_s', 0):.2f} "
+                f"| {bd.get('coordination_pct', 0)}% "
+                f"| {total:.2f} |\n"
+            )
+
+        # ── Per-Step Resource Attribution ─────────────────────────────────────
+        report += """
+---
+
+## 🔍 Per-Step Resource Attribution
+
+Resource usage (CPU %, Memory MB) is estimated by interpolating each timeline event's
+position in the log against wall-clock timestamps captured by the resource monitor.
+
+"""
+        for result in results:
+            profiles = result.step_resource_profiles
+            if not profiles:
+                report += f"### {result.test_case.name}\n_No timeline events captured._\n\n"
+                continue
+
+            report += f"### {result.test_case.name} ({result.test_case.category})\n\n"
+            report += "| # | Event Type | Time Offset (s) | CPU % | Memory (MB) |\n"
+            report += "|---|------------|-----------------|-------|-------------|\n"
+            for i, p in enumerate(profiles, 1):
+                report += (
+                    f"| {i} | {p['event_type']} "
+                    f"| {p['time_offset_s']:.2f} "
+                    f"| {p['cpu_percent']:.1f} "
+                    f"| {p['memory_mb']:.1f} |\n"
+                )
+            report += "\n"
+
         # Add insights and recommendations
         all_recommendations = []
         for result in results:
