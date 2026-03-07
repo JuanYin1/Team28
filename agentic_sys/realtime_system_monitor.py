@@ -24,6 +24,7 @@ import time
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Dict, List, Optional
 import psutil
 import os
@@ -134,17 +135,20 @@ class RealTimeSystemMonitor:
         self.monitoring = False
         self.monitor_thread = None
         self.target_process = None
+        self.target_process_name = "mini-agent"
         self.start_time = None
         
         # Initialize baseline metrics
         self._initial_disk_io = psutil.disk_io_counters()
         self._initial_network_io = psutil.net_io_counters()
         
-    def start_monitoring(self, target_process_name: str = "python"):
+    def start_monitoring(self, target_process_name: str = "mini-agent"):
         """Start real-time monitoring"""
         self.monitoring = True
         self.start_time = time.time()
         self.snapshots.clear()
+        self.target_process_name = target_process_name
+        self.target_process = None
         
         # Find target process (Mini-Agent)
         self._find_target_process(target_process_name)
@@ -166,18 +170,41 @@ class RealTimeSystemMonitor:
         logger.info(f"Stopped monitoring. Collected {len(self.snapshots)} samples over {analysis.monitoring_duration:.1f}s")
         
         return analysis
+
+    def set_target_pid(self, pid: int):
+        """Attach monitoring to a known process PID (preferred over fuzzy matching)."""
+        try:
+            self.target_process = psutil.Process(pid)
+            # Prime CPU stats so subsequent cpu_percent values are meaningful.
+            self.target_process.cpu_percent(interval=None)
+            logger.info(f"Attached monitor to PID {pid}")
+        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            logger.warning(f"Could not attach monitor to PID {pid}: {e}")
+            self.target_process = None
     
     def _find_target_process(self, process_name: str):
         """Find the target process to monitor"""
+        name_hint = (process_name or "").lower()
+
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
-                if process_name.lower() in proc.info['name'].lower():
-                    # Look for Mini-Agent specifically
-                    cmdline = ' '.join(proc.info['cmdline']) if proc.info['cmdline'] else ''
-                    if 'mini-agent' in cmdline.lower() or 'mini_agent' in cmdline.lower():
-                        self.target_process = psutil.Process(proc.info['pid'])
-                        logger.info(f"Found target process: {proc.info['name']} (PID: {proc.info['pid']})")
-                        break
+                proc_name = (proc.info.get('name') or '').lower()
+                cmd_parts = proc.info.get('cmdline') or []
+                cmdline = ' '.join(cmd_parts).lower()
+
+                # Match either by explicit hint or by known mini-agent markers.
+                hint_match = name_hint and (name_hint in proc_name or name_hint in cmdline)
+                mini_agent_match = (
+                    'mini-agent' in proc_name or
+                    any(Path(part).name.lower() in {'mini-agent', 'mini-agent.exe'} for part in cmd_parts)
+                )
+
+                if hint_match or mini_agent_match:
+                    self.target_process = psutil.Process(proc.info['pid'])
+                    # Prime CPU stats so subsequent cpu_percent values are meaningful.
+                    self.target_process.cpu_percent(interval=None)
+                    logger.info(f"Found target process: {proc.info['name']} (PID: {proc.info['pid']})")
+                    break
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
     
@@ -199,11 +226,17 @@ class RealTimeSystemMonitor:
         # CPU Metrics
         cpu_percent = psutil.cpu_percent()
         cpu_percents = psutil.cpu_percent(percpu=True)
-        cpu_freq = psutil.cpu_freq()
+        try:
+            cpu_freq = psutil.cpu_freq()
+        except Exception:
+            cpu_freq = None
         
         # Memory Metrics
         memory = psutil.virtual_memory()
-        swap = psutil.swap_memory()
+        try:
+            swap = psutil.swap_memory()
+        except Exception:
+            swap = SimpleNamespace(total=0, used=0, percent=0.0)
         
         # Disk I/O Metrics
         disk_io = psutil.disk_io_counters()
@@ -218,6 +251,10 @@ class RealTimeSystemMonitor:
         process_memory_percent = 0.0
         process_threads = 0
         process_files = 0
+
+        # Best-effort process attachment: the target may not exist when monitoring starts.
+        if self.target_process is None:
+            self._find_target_process(self.target_process_name)
         
         if self.target_process:
             try:

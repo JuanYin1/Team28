@@ -51,6 +51,30 @@ from advanced_evaluation_system import (
 
 logger = logging.getLogger(__name__)
 
+
+def _looks_like_mini_agent_process(process_name: str, cmd_parts: List[str]) -> bool:
+    """Best-effort matcher for mini-agent processes across launcher variants."""
+    normalized_name = Path(process_name or "").name.lower().replace("_", "-")
+    normalized_parts = [
+        Path(part).name.lower().replace("_", "-")
+        for part in (cmd_parts or [])
+        if part
+    ]
+
+    if "mini-agent" in normalized_name:
+        return True
+
+    if any(part in {"mini-agent", "mini-agent.exe"} for part in normalized_parts):
+        return True
+
+    lowered_cmd = [(part or "").lower() for part in (cmd_parts or [])]
+    for idx, token in enumerate(lowered_cmd[:-1]):
+        if token == "-m" and lowered_cmd[idx + 1].replace("_", "-") == "mini-agent":
+            return True
+
+    return "mini-agent" in " ".join(lowered_cmd).replace("_", "-")
+
+
 @dataclass
 class MiniAgentCLEARMetrics:
     """CLEAR Framework metrics specifically for Mini-Agent evaluation"""
@@ -171,7 +195,7 @@ class MiniAgentEvaluationResult:
 class StepResourceProfile:
     """Resource usage snapshot correlated to a specific agent timeline event"""
     step: Optional[int]
-    event_type: str           # "thinking", "tool_call", "assistant_response", "error", "success"
+    event_type: str           # "thinking", "tool_call", "tool_result", "assistant_response", "error"
     time_offset_s: float      # seconds elapsed from task start when this event occurred (estimated)
     cpu_percent: float
     memory_mb: float
@@ -186,9 +210,22 @@ class MiniAgentResourceMonitor:
         self.peak_memory = 0.0
         self.cpu_samples = []
         self.mini_agent_process = None
+        self.target_pid: Optional[int] = None
         self.monitor_thread = None
         # Timestamped snapshots: List of (abs_timestamp, memory_mb, cpu_pct)
         self.snapshots: List[Tuple[float, float, float]] = []
+
+    def set_target_pid(self, pid: int):
+        """Attach monitor to a known process PID."""
+        self.target_pid = pid
+        if not PSUTIL_AVAILABLE:
+            return
+        try:
+            self.mini_agent_process = psutil.Process(pid)
+            # Prime CPU accounting so subsequent samples are meaningful.
+            self.mini_agent_process.cpu_percent(interval=None)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            self.mini_agent_process = None
         
     def start_monitoring(self):
         """Start monitoring mini-agent process resources"""
@@ -197,6 +234,8 @@ class MiniAgentResourceMonitor:
         self.peak_memory = 0.0
         self.cpu_samples = []
         self.snapshots = []
+        self.mini_agent_process = None
+        self.target_pid = None
         
         def monitor_loop():
             while self.monitoring:
@@ -206,14 +245,23 @@ class MiniAgentResourceMonitor:
                     cpu_pct = 0.0
 
                     if PSUTIL_AVAILABLE:
-                        # Try to find the mini-agent process; fall back to system-wide metrics
+                        # Prefer explicit PID attachment when available.
+                        if self.mini_agent_process is None and self.target_pid is not None:
+                            try:
+                                self.mini_agent_process = psutil.Process(self.target_pid)
+                                self.mini_agent_process.cpu_percent(interval=None)
+                            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                                self.mini_agent_process = None
+
+                        # Fallback discovery by executable token.
                         if self.mini_agent_process is None:
                             for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
                                 try:
-                                    name = proc.info.get('name') or ''
-                                    cmdline = ' '.join(proc.info.get('cmdline') or [])
-                                    if 'mini-agent' in name.lower() or 'mini_agent' in cmdline.lower():
+                                    name = (proc.info.get('name') or '').lower()
+                                    cmd_parts = proc.info.get('cmdline') or []
+                                    if _looks_like_mini_agent_process(name, cmd_parts):
                                         self.mini_agent_process = psutil.Process(proc.info['pid'])
+                                        self.mini_agent_process.cpu_percent(interval=None)
                                         break
                                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                                     continue
@@ -224,12 +272,6 @@ class MiniAgentResourceMonitor:
                                 cpu_pct = self.mini_agent_process.cpu_percent()
                             except (psutil.NoSuchProcess, psutil.AccessDenied):
                                 self.mini_agent_process = None
-
-                        # Fall back to system-wide memory if process not found
-                        if memory_mb == 0.0:
-                            mem = psutil.virtual_memory()
-                            memory_mb = mem.used / 1024 / 1024
-                            cpu_pct = psutil.cpu_percent()
 
                     self.peak_memory = max(self.peak_memory, memory_mb)
                     self.cpu_samples.append(cpu_pct)
@@ -276,7 +318,7 @@ class MiniAgentLogAnalyzer:
         self.thinking_pattern = r"🧠 Thinking:"
         self.assistant_pattern = r"🤖 Assistant:"
         self.error_pattern = r"❌|✗ Error"
-        self.success_pattern = r"✅|✓ Result"
+        self.tool_result_pattern = r"(?:✓|✅)\s*Result"
         
         # Session statistics pattern (from end of log)
         self.session_stats_pattern = r"Total Messages:\s*(\d+).*Tool Calls:\s*(\d+).*API Tokens Used:\s*([\d,]+)"
@@ -338,7 +380,10 @@ class MiniAgentLogAnalyzer:
         
         # Remove duplicates and clean up
         analysis["tools_used"] = list(dict.fromkeys(analysis["tools_used"]))  # Remove duplicates, preserve order
-        analysis["tool_call_count"] = len(analysis["tools_used"])
+        analysis["tool_call_count"] = sum(
+            1 for event in analysis["detailed_timeline"]
+            if event.get("event_type") == "tool_call"
+        )
         
         return analysis
     
@@ -424,14 +469,21 @@ class MiniAgentLogAnalyzer:
                     "text": line.strip()
                 })
             
-            if re.search(self.success_pattern, line):
+            if re.search(self.tool_result_pattern, line):
                 analysis["successful_operations"] += 1
-                analysis["detailed_timeline"].append({
-                    "event_type": "success",
-                    "step": current_step,
-                    "line": i
-                })
+                if current_step is not None:
+                    analysis["detailed_timeline"].append({
+                        "event_type": "tool_result",
+                        "step": current_step,
+                        "line": i
+                    })
         
+        # Update total tool-call count before timing estimation.
+        analysis["tool_call_count"] = sum(
+            1 for event in analysis["detailed_timeline"]
+            if event.get("event_type") == "tool_call"
+        )
+
         # Calculate tool-specific timing estimates
         self._estimate_tool_timings(analysis)
     
@@ -439,8 +491,10 @@ class MiniAgentLogAnalyzer:
         """Estimate timing for each tool call based on available timing data"""
         
         # Use session duration to estimate tool timing
-        if "session_duration" in analysis and analysis["tool_call_count"] > 0:
-            total_session_time = analysis["session_duration"]["total_seconds"]
+        session_duration = analysis.get("session_duration") or {}
+        total_session_time = session_duration.get("total_seconds")
+
+        if total_session_time is not None and analysis["tool_call_count"] > 0:
             total_tools = analysis["tool_call_count"]
             
             # Simple estimation: divide session time among tools
@@ -553,12 +607,16 @@ class MiniAgentCLEAREvaluator:
 
             # 3. Try conda run as fallback (works without activating env)
             if found is None:
-                test = subprocess.run(
-                    ["conda", "run", "-n", "mini-agent", "mini-agent", "--version"],
-                    capture_output=True, text=True
-                )
-                if test.returncode == 0:
-                    found = "__conda_run__"  # special sentinel
+                try:
+                    test = subprocess.run(
+                        ["conda", "run", "-n", "mini-agent", "mini-agent", "--version"],
+                        capture_output=True, text=True
+                    )
+                    if test.returncode == 0:
+                        found = "__conda_run__"  # special sentinel
+                except FileNotFoundError:
+                    # conda is optional; we'll continue to the unified RuntimeError below.
+                    pass
 
             if found is None:
                 raise RuntimeError(
@@ -755,6 +813,7 @@ Please show me the complete process including testing.""",
         
         try:
             with tempfile.TemporaryDirectory() as temp_workspace:
+                process = None
                 
                 if getattr(self, "_use_conda_run", False):
                     cmd = [
@@ -771,17 +830,32 @@ Please show me the complete process including testing.""",
 
                 logger.info(f"Executing: {' '.join(cmd[:4])} ...")
 
-                # Execute mini-agent with task
-                # Use utf-8 + replace to handle emoji/Unicode output on Windows (avoids cp1252 UnicodeDecodeError)
-                process = subprocess.run(
+                # Execute mini-agent with task.
+                process = subprocess.Popen(
                     cmd,
-                    capture_output=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=test_case.evaluation_criteria.max_task_time_seconds,
                     cwd=temp_workspace,
                 )
+                self._bind_monitor_target_pid(process.pid, conda_mode=getattr(self, "_use_conda_run", False))
+
+                try:
+                    stdout, stderr = process.communicate(
+                        timeout=test_case.evaluation_criteria.max_task_time_seconds
+                    )
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    stdout, stderr = process.communicate()
+                    execution_time = time.time() - start_time
+                    timeout_msg = (
+                        f"Task timed out after "
+                        f"{test_case.evaluation_criteria.max_task_time_seconds} seconds"
+                    )
+                    combined_stderr = f"{stderr}\n{timeout_msg}" if stderr else timeout_msg
+                    return stdout or "", combined_stderr, False, execution_time
                 
                 execution_time = time.time() - start_time
                 success = process.returncode == 0
@@ -796,18 +870,53 @@ Please show me the complete process including testing.""",
                         try:
                             content = file_path.read_text()
                             # Append file content to stdout for analysis
-                            process.stdout += f"\n[FILE_CONTENT:{expected_file}]\n{content}\n[/FILE_CONTENT]"
+                            stdout = (stdout or "") + f"\n[FILE_CONTENT:{expected_file}]\n{content}\n[/FILE_CONTENT]"
                         except:
                             pass
                 
-                return process.stdout, process.stderr, success, execution_time
+                return stdout or "", stderr or "", success, execution_time
                 
-        except subprocess.TimeoutExpired:
-            execution_time = time.time() - start_time
-            return "", f"Task timed out after {test_case.evaluation_criteria.max_task_time_seconds} seconds", False, execution_time
         except Exception as e:
             execution_time = time.time() - start_time
             return "", f"Execution error: {str(e)}", False, execution_time
+
+    def _bind_monitor_target_pid(self, launcher_pid: int, conda_mode: bool) -> None:
+        """
+        Bind resource monitor to the best target PID.
+
+        - direct mode: bind to launcher pid directly (mini-agent itself)
+        - conda mode: launcher is usually `conda`; try to find the spawned mini-agent child
+        """
+        if not PSUTIL_AVAILABLE:
+            return
+
+        if not conda_mode:
+            self.resource_monitor.set_target_pid(launcher_pid)
+            return
+
+        try:
+            launcher = psutil.Process(launcher_pid)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return
+
+        deadline = time.time() + 3.0
+        while time.time() < deadline:
+            try:
+                children = launcher.children(recursive=True)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                children = []
+
+            for child in children:
+                try:
+                    name = (child.name() or "").lower()
+                    cmd_parts = child.cmdline() or []
+                    if _looks_like_mini_agent_process(name, cmd_parts):
+                        self.resource_monitor.set_target_pid(child.pid)
+                        return
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            time.sleep(0.1)
     
     async def evaluate_mini_agent_test(self, test_case: MiniAgentTestCase) -> MiniAgentEvaluationResult:
         """
@@ -826,7 +935,6 @@ Please show me the complete process including testing.""",
             # Execute Mini-Agent task — record wall-clock start for correlation later
             task_start_time = time.time()
             stdout, stderr, success, execution_time = await self.execute_mini_agent_task(test_case)
-            start_time = task_start_time  # alias kept for any existing references below
             
             # Stop resource monitoring
             _, peak_memory, avg_cpu = self.resource_monitor.stop_monitoring()
@@ -899,7 +1007,7 @@ Please show me the complete process including testing.""",
             
             # Map to CLEAR Assurance metrics
             clear_metrics.task_completion_accuracy = evaluation_result.correctness_score
-            clear_metrics.output_quality_score = evaluation_result.overall_score
+            clear_metrics.output_quality_score = max(0.0, min(1.0, evaluation_result.overall_score))
             clear_metrics.reasoning_coherence = evaluation_result.reasoning_score
             clear_metrics.tool_usage_correctness = min(1.0, clear_metrics.tool_selection_accuracy + 0.2)
             
@@ -949,7 +1057,7 @@ Please show me the complete process including testing.""",
                 agent_output=stdout,
                 agent_error_output=stderr,
                 execution_logs=stdout + "\n--- STDERR ---\n" + stderr,
-                tools_used=list(set(log_analysis["tools_used"])),
+                tools_used=list(dict.fromkeys(log_analysis["tools_used"])),
                 step_breakdown=log_analysis["step_breakdown"],
                 overall_clear_score=overall_clear_score,
                 passed_all_thresholds=passed_thresholds,
@@ -1116,7 +1224,7 @@ Please show me the complete process including testing.""",
         Strategy: each event in the detailed_timeline is assigned a 'weight' based on
         its type. Weights reflect typical duration profiles:
           - thinking / assistant_response  → weight 3  (API round-trip dominates)
-          - tool_call / success            → weight 1  (local or fast shell ops)
+          - tool_call / tool_result        → weight 1  (local or fast shell ops)
           - coordination (step markers,
             errors, etc.)                 → weight 0.5 (bookkeeping overhead)
 
@@ -1126,7 +1234,7 @@ Please show me the complete process including testing.""",
         timeline = log_analysis.get("detailed_timeline", [])
 
         LLM_TYPES = {"thinking", "assistant_response"}
-        TOOL_TYPES = {"tool_call", "success"}
+        TOOL_TYPES = {"tool_call", "tool_result"}
 
         if not timeline:
             llm_s = round(execution_time * 0.70, 2)
@@ -1246,6 +1354,7 @@ Please show me the complete process including testing.""",
         filepath = self.results_dir / filename
         
         result_dict = {
+            "schema_version": "phase3.v2",
             "test_case": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,
@@ -1451,20 +1560,42 @@ position in the log against wall-clock timestamps captured by the resource monit
         for rec_key, count in sorted_recs:
             full_rec = next(rec for rec in all_recommendations if rec.startswith(rec_key))
             report += f"- **({count}x)** {full_rec}\n"
-        
+
+        strengths: List[str] = []
+        if avg_time <= 60:
+            strengths.append("✅ Fast execution times")
+        if avg_cost <= 0.2:
+            strengths.append("✅ Cost-effective operation")
+        if avg_accuracy >= 0.7:
+            strengths.append("✅ High accuracy scores")
+        if avg_steps <= 10:
+            strengths.append("✅ Efficient step usage")
+
+        improvements: List[str] = []
+        if avg_time > 90:
+            improvements.append("⚠️ Optimize execution time")
+        if avg_cost > 0.3:
+            improvements.append("⚠️ Reduce operational costs")
+        if avg_accuracy < 0.6:
+            improvements.append("⚠️ Improve task accuracy")
+        if avg_steps > 15:
+            improvements.append("⚠️ Optimize step efficiency")
+
+        if not strengths:
+            strengths.append("(none)")
+        if not improvements:
+            improvements.append("(none)")
+
+        strengths_md = "\n".join(f"- {item}" for item in strengths)
+        improvements_md = "\n".join(f"- {item}" for item in improvements)
+
         report += f"""
 
 ### ✅ System Strengths:
-- {"✅ Fast execution times" if avg_time <= 60 else ""}
-- {"✅ Cost-effective operation" if avg_cost <= 0.2 else ""}
-- {"✅ High accuracy scores" if avg_accuracy >= 0.7 else ""}
-- {"✅ Efficient step usage" if avg_steps <= 10 else ""}
+{strengths_md}
 
 ### ⚠️ Areas for Improvement:
-- {"⚠️ Optimize execution time" if avg_time > 90 else ""}
-- {"⚠️ Reduce operational costs" if avg_cost > 0.3 else ""}
-- {"⚠️ Improve task accuracy" if avg_accuracy < 0.6 else ""}
-- {"⚠️ Optimize step efficiency" if avg_steps > 15 else ""}
+{improvements_md}
 
 ---
 
