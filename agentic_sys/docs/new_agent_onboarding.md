@@ -1,50 +1,24 @@
-# New Agent Onboarding (YAML-Only)
+# New Agent Onboarding (Step-by-Step)
 
-Goal: add a new agent without writing Python adapter/registry code.
+This guide shows teammates how to add a new agent to this repo.
+Goal: only edit `config/config.yaml`, no Python adapter code.
 
-You only edit `config/config.yaml`, then run scripts with `--agent <name-or-alias>`.
+## 1) Before you start
 
-If the agent uses org-level credits (for example Continue), set the org slug in adapter `extra_args` so teammates share the same billing workspace.
+Your agent CLI must support non-interactive runs:
+- accepts task/prompt input,
+- exits with stable return code,
+- prints useful stdout/stderr.
 
-## Quick Start
-
-1. Add a new `agents.<your-agent>` profile in `config/config.yaml` (template below).
-2. Run:
+## 2) Open project
 
 ```bash
-python run_single_test.py --agent <your-agent>
-python integrated_mini_agent_evaluation.py --agent <your-agent>
-python enhanced_comprehensive_evaluation.py --agent <your-agent>
-python mini_agent_clear_evaluation_system.py --agent <your-agent>
+cd agentic_sys
 ```
 
-3. Check agent-specific result directories.
+## 3) Add a new profile in `config/config.yaml`
 
-## Step 1: Runtime Requirements
-
-Your CLI runtime must:
-
-- accept task/prompt input,
-- run non-interactively,
-- produce deterministic exit codes,
-- print useful stdout/stderr.
-
-## Step 2: Understand Placeholder Contract
-
-`generic-cli` supports these placeholders:
-
-- `{workspace}`
-- `{task_prompt}`
-- `{timeout_seconds}`
-
-They can be used in:
-
-- `adapter.command`
-- `adapter.cwd`
-- `adapter.env` values
-- `adapter.extra_args`
-
-## Step 3: Copy This YAML Template
+Copy this template and replace names/command:
 
 ```yaml
 agents:
@@ -75,64 +49,44 @@ agents:
       success_codes: [0]
 ```
 
-## Step 4: Minimum Required Fields
+## 4) Required fields
 
-- `agents.<name>.adapter.type: generic-cli`
-- `agents.<name>.adapter.command` (recommended) or equivalent executable definition
+These must exist:
+- `adapter.type: generic-cli`
+- `adapter.command`
 
-## Step 5: Recommended Fields
+## 5) Useful optional fields
 
-- `aliases` for shorter CLI usage
-- `scripts.*.results_dir` to isolate outputs per agent
-- `process_name_hint` for better process metric binding in phase2/phase3
-- `extra_args` for default org/model/runtime flags shared by all scripts
+- `aliases`: short names for `--agent`
+- `scripts.*.results_dir`: separate outputs by agent
+- `process_name_hint`: better process monitoring in phase2/phase3
+- `success_codes`: include all success return codes your CLI uses
 
-Continue example (workspace credit via org slug):
+## 6) Supported placeholders
 
-```yaml
-adapter:
-  type: continue-cn
-  config_path: continuedev/default-cli-config
-  extra_args: [--org, zhiruis-workspace-2, --auto]
-```
+You can use these in `command`, `cwd`, `env`, `extra_args`:
+- `{workspace}`
+- `{task_prompt}`
+- `{timeout_seconds}`
 
-## Step 6: Validate in Order
+## 7) Validate the new agent
 
-From `agentic_sys/`:
-
-### 6.1 Smoke
+Run in this order:
 
 ```bash
 python run_single_test.py --agent my-agent
-```
-
-### 6.2 Phase1
-
-```bash
 python integrated_mini_agent_evaluation.py --agent my-agent
-```
-
-### 6.3 Phase2
-
-```bash
 python enhanced_comprehensive_evaluation.py --agent my-agent
-```
-
-### 6.4 Phase3
-
-```bash
 python mini_agent_clear_evaluation_system.py --agent my-agent
 ```
 
-Alias also works:
+Alias example:
 
 ```bash
 python run_single_test.py --agent my
 ```
 
-## Step 7: Override Adapter Fields from CLI (Optional)
-
-No YAML edits needed for temporary changes:
+## 8) Temporary overrides without editing YAML
 
 ```bash
 python run_single_test.py \
@@ -141,61 +95,39 @@ python run_single_test.py \
   --adapter-option 'env={"MY_FLAG":"1"}'
 ```
 
-## Common Patterns
+## 9) Continue-specific example
 
-### Workspace-aware CLI (recommended)
-
-```yaml
-adapter:
-  type: generic-cli
-  command: [my-agent, --workspace, "{workspace}", --task, "{task_prompt}"]
-  cwd: "{workspace}"
-  success_codes: [0]
-```
-
-### Prompt-only CLI
+If onboarding Continue in team workspace mode:
 
 ```yaml
 adapter:
-  type: generic-cli
-  command: [my-agent, -p, "{task_prompt}"]
-  cwd: "{workspace}"
-  success_codes: [0]
+  type: continue-cn
+  config_path: continuedev/default-cli-config
+  model_slugs: [anthropic/claude-haiku-4-5]
+  extra_args: [--org, zhiruis-workspace-2, --auto]
 ```
 
-### Multiple success codes
+If using API key mode, teammate also sets:
 
-```yaml
-adapter:
-  type: generic-cli
-  command: [my-agent, "{task_prompt}"]
-  success_codes: [0, 2]
+```bash
+export CONTINUE_API_KEY="<ORG_SCOPED_KEY>"
 ```
 
-## Troubleshooting
+## 10) Troubleshooting
 
-- `Unsupported placeholder ...`
-  - Use only `{workspace}`, `{task_prompt}`, `{timeout_seconds}`.
 - `Unsupported agent ...`
-  - Ensure profile exists and `--agent` matches name/alias.
+  - profile name/alias does not match `--agent`.
 - `Execution error: [Errno 2] ...`
-  - Executable not found; use absolute path in `command[0]`.
+  - command executable not found.
+- `Unsupported placeholder ...`
+  - only `{workspace}`, `{task_prompt}`, `{timeout_seconds}` are valid.
 - Phase3 metrics look coarse
-  - Runtime lacks structured step/tool traces; system uses fair coarse attribution mode.
+  - runtime has no structured trace; phase3 uses coarse attribution mode.
 
-## Adapter Types
-
-- `mini-agent`
-- `continue-cn`
-- `generic-cli`
-
-For most new runtimes, start with `generic-cli`.
-Only add custom Python adapter if your runtime cannot be expressed as a CLI command template.
-
-## Team Checklist
+## 11) Team handoff checklist
 
 1. Profile added in `config/config.yaml`.
-2. Smoke test completed.
-3. Phase1/2/3 completed.
-4. Agent-specific result directories confirmed.
-5. Required secrets/env documented outside repo.
+2. Smoke test passed (`run_single_test.py`).
+3. Phase1/Phase2/Phase3 run end-to-end.
+4. Output directories are agent-specific.
+5. Required secrets are documented and shared securely.
