@@ -16,7 +16,7 @@ from pathlib import Path
 # Make sure we can import from the same directory
 sys.path.insert(0, str(Path(__file__).parent))
 
-from mini_agent_clear_evaluation_system import AgentCLEAREvaluator
+from clear_evaluation_system import AgentCLEAREvaluator
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.script_config import resolve_script_runtime_options
 
@@ -80,7 +80,7 @@ async def main(argv=None):
     results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
         args=args,
         script_name="run_single_test",
-        default_results_dir="phase3",
+        default_results_dir="artifacts/mini-agent/phase3/single_test",
     )
     adapter = create_agent_adapter(
         agent=args.agent,

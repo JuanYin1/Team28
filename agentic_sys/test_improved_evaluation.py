@@ -5,7 +5,7 @@ Test script for the improved agent evaluation system.
 
 import asyncio
 import logging
-from mini_agent_clear_evaluation_system import AgentCLEAREvaluator, AgentTestCase, AgentTestCriteria
+from clear_evaluation_system import AgentCLEAREvaluator, AgentTestCase, AgentTestCriteria
 
 async def test_simple_case():
     """Test the improved evaluation system with a simple case"""

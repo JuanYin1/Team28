@@ -26,13 +26,13 @@ agents:
     aliases: [my, my-cli]
     scripts:
       phase1:
-        results_dir: phase1_my_agent
+        results_dir: artifacts/my-agent/phase1
       phase2:
-        results_dir: phase2_my_agent
+        results_dir: artifacts/my-agent/phase2
       phase3:
-        results_dir: phase3_my_agent
+        results_dir: artifacts/my-agent/phase3
       run_single_test:
-        results_dir: phase3_my_agent_single
+        results_dir: artifacts/my-agent/phase3/single_test
     adapter:
       type: generic-cli
       agent_id: my-agent
@@ -75,9 +75,9 @@ Run in this order:
 
 ```bash
 python run_single_test.py --agent my-agent
-python integrated_mini_agent_evaluation.py --agent my-agent
+python integrated_agent_evaluation.py --agent my-agent
 python enhanced_comprehensive_evaluation.py --agent my-agent
-python mini_agent_clear_evaluation_system.py --agent my-agent
+python clear_evaluation_system.py --agent my-agent
 ```
 
 Alias example:

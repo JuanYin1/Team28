@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Reasoning-Focused Test Cases for Mini-Agent
+Reasoning-Focused Test Cases for Agent Runtimes
 ==========================================
 Enhanced test cases specifically designed to encourage explicit reasoning steps
 and improve the reasoning quality scores.
 """
 
 from advanced_evaluation_system import EvaluationCriteria
-from integrated_mini_agent_evaluation import TestCaseDefinition
+from integrated_agent_evaluation import TestCaseDefinition
 
 def create_reasoning_enhanced_test_suite():
     """Create test cases with explicit reasoning prompts to improve step-by-step thinking"""

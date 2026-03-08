@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Mini-Agent CLEAR Evaluation Visualizer
+Agent CLEAR Evaluation Visualizer
 ========================================
 Generates detailed charts for per-step resource usage and execution time from
-the JSON result files produced by mini_agent_clear_evaluation_system.py.
+the JSON result files produced by clear_evaluation_system.py.
 
 Usage:
-    # auto-pick the latest result in phase3/
+    # auto-pick the latest result in artifacts/mini-agent/phase3/
     python visualize_results.py
 
     # specific file
-    python visualize_results.py phase3/mini_agent_simple_file_operations_*.json
+    python visualize_results.py artifacts/mini-agent/phase3/mini_agent_simple_file_operations_*.json
 
     # multiple files (generates per-file dashboard + comparison chart)
-    python visualize_results.py phase3/result_a.json phase3/result_b.json
+    python visualize_results.py artifacts/mini-agent/phase3/result_a.json artifacts/mini-agent/phase3/result_b.json
 
 Outputs a PNG file next to each input JSON, plus an optional comparison PNG.
 """
@@ -513,7 +513,7 @@ def generate_dashboard(result: Dict[str, Any], output_path: Path) -> None:
     fig = plt.figure(figsize=(18, 20))
     fig.patch.set_facecolor("#FAFAFA")
     fig.suptitle(
-        "Mini-Agent -- Execution Analysis Dashboard\n"
+        "Agent Runtime -- Execution Analysis Dashboard\n"
         "Test: %s   |   Total time: %.1fs   |   CLEAR Score: %.3f  [%s]"
         % (test_name, total_t, clear_score, status_str),
         fontsize=13, fontweight="bold", y=0.99,
@@ -556,7 +556,7 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
         return
 
     fig, axes = plt.subplots(2, 2, figsize=(18, 12))
-    fig.suptitle("Mini-Agent -- Multi-Test Comparison Dashboard",
+    fig.suptitle("Agent Runtime -- Multi-Test Comparison Dashboard",
                  fontsize=14, fontweight="bold")
 
     # -- Grouped bar: time breakdown ------------------------------------------
@@ -647,17 +647,17 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Visualize Mini-Agent CLEAR evaluation JSON results.",
+        description="Visualize Agent CLEAR evaluation JSON results.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     p.add_argument(
         "files", nargs="*",
-        help="JSON result file(s). Defaults to the latest file in phase3/.",
+        help="JSON result file(s). Defaults to the latest file in artifacts/mini-agent/phase3/.",
     )
     p.add_argument(
-        "--results-dir", default="phase3",
-        help="Directory to search when no files are specified (default: phase3/).",
+        "--results-dir", default="artifacts/mini-agent/phase3",
+        help="Directory to search when no files are specified (default: artifacts/mini-agent/phase3/).",
     )
     return p.parse_args()
 

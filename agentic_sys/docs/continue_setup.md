@@ -63,9 +63,9 @@ Expected: `Success: True` and `Diagnosis: ok`.
 
 ```bash
 python run_single_test.py --agent continue
-python integrated_mini_agent_evaluation.py --agent continue
+python integrated_agent_evaluation.py --agent continue
 python enhanced_comprehensive_evaluation.py --agent continue
-python mini_agent_clear_evaluation_system.py --agent continue
+python clear_evaluation_system.py --agent continue
 ```
 
 ## 6) Common errors and fixes

@@ -5,6 +5,11 @@ from .continue_healthcheck import (
     run_continue_healthcheck,
 )
 from .factory import create_agent_adapter, supported_agent_cli_choices
+from .safe_healthcheck import (
+    SafeHealthcheckReport,
+    build_safe_healthcheck_command,
+    run_safe_healthcheck,
+)
 from .registry import canonicalize_agent, get_registration
 from .models import (
     AgentExecutionRequest,
@@ -26,6 +31,9 @@ __all__ = [
     "run_continue_healthcheck",
     "create_agent_adapter",
     "supported_agent_cli_choices",
+    "SafeHealthcheckReport",
+    "build_safe_healthcheck_command",
+    "run_safe_healthcheck",
     "canonicalize_agent",
     "get_registration",
     "AgentExecutionRequest",

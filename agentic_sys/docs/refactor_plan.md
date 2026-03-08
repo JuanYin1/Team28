@@ -6,9 +6,9 @@
 - Ensure each module is independently testable and edge-case resilient.
 
 ## Scope
-- Phase1 (`integrated_mini_agent_evaluation.py`) execution path.
+- Phase1 (`integrated_agent_evaluation.py`) execution path.
 - Phase2 (`enhanced_comprehensive_evaluation.py`) execution + monitor attachment.
-- Phase3 (`mini_agent_clear_evaluation_system.py`) execution path for CLEAR pipeline.
+- Phase3 (`clear_evaluation_system.py`) execution path for CLEAR pipeline.
 - New shared runtime abstraction layer under `agent_runtime/`.
 
 ## Target Architecture

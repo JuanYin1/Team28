@@ -47,7 +47,7 @@ agents:
             results_dir, adapter_kwargs, _ = resolve_script_runtime_options(
                 args=args,
                 script_name="run_single_test",
-                default_results_dir="phase3",
+                default_results_dir="artifacts/mini-agent/phase3/single_test",
             )
             adapter = create_agent_adapter(agent=args.agent, auto_detect=False, **adapter_kwargs)
 

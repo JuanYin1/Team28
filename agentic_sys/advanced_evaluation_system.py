@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Advanced Evaluation System for Mini-Agent Benchmarks
+Advanced Evaluation System for Agent Runtime Benchmarks
 =====================================================
 Research-grade evaluation methodology combining multiple established LLM benchmark approaches.
 

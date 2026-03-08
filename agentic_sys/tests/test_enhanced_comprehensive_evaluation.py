@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 from agent_runtime.models import AgentExecutionResult
 from advanced_evaluation_system import EvaluationCriteria, EvaluationResult
 from enhanced_comprehensive_evaluation import EnhancedAgentEvaluator, EnhancedTestResult
-from integrated_mini_agent_evaluation import TestCaseDefinition
+from integrated_agent_evaluation import TestCaseDefinition
 from realtime_system_monitor import PerformanceAnalysis
 
 

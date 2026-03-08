@@ -22,7 +22,7 @@ from typing import List, Optional
 from advanced_evaluation_system import AdvancedEvaluator, EvaluationResult
 from realtime_system_monitor import RealTimeSystemMonitor, PerformanceAnalysis
 from reasoning_focused_tests import create_reasoning_enhanced_test_suite, create_system_stress_tests
-from integrated_mini_agent_evaluation import TestCaseDefinition, ComprehensiveTestResult
+from integrated_agent_evaluation import TestCaseDefinition, ComprehensiveTestResult
 from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
@@ -56,11 +56,11 @@ class EnhancedAgentEvaluator:
     
     def __init__(
         self,
-        results_dir: str = "enhanced_evaluation_results",
+        results_dir: str = "artifacts/mini-agent/phase2",
         agent_adapter: Optional[AgentAdapter] = None,
     ):
         self.results_dir = Path(results_dir)
-        self.results_dir.mkdir(exist_ok=True)
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         self.evaluator = AdvancedEvaluator(use_llm_judge=False)
         self.agent_adapter = agent_adapter or MiniAgentAdapter()
 
@@ -100,7 +100,7 @@ class EnhancedAgentEvaluator:
     
     def _get_original_tests(self) -> List[TestCaseDefinition]:
         """Get the original 5 baseline tests for comparison"""
-        from integrated_mini_agent_evaluation import IntegratedAgentEvaluator
+        from integrated_agent_evaluation import IntegratedAgentEvaluator
         
         baseline_evaluator = IntegratedAgentEvaluator()
         original_tests = baseline_evaluator.create_comprehensive_test_suite()
@@ -601,7 +601,7 @@ async def main(argv: Optional[List[str]] = None):
     results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
         args=args,
         script_name="phase2",
-        default_results_dir="enhanced_evaluation_results",
+        default_results_dir="artifacts/mini-agent/phase2",
     )
     adapter = create_agent_adapter(
         agent=args.agent,

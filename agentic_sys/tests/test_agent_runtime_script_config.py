@@ -47,7 +47,7 @@ agents:
             results_dir, adapter_kwargs, source = resolve_script_runtime_options(
                 args=args,
                 script_name="run_single_test",
-                default_results_dir="phase3",
+                default_results_dir="artifacts/mini-agent/phase3/single_test",
             )
 
         self.assertEqual(results_dir, "phase3_from_yaml")
@@ -89,7 +89,7 @@ agents:
             results_dir, adapter_kwargs, _ = resolve_script_runtime_options(
                 args=args,
                 script_name="phase2",
-                default_results_dir="enhanced_evaluation_results",
+                default_results_dir="artifacts/mini-agent/phase2",
             )
 
         self.assertEqual(results_dir, "phase2_from_cli")
@@ -127,7 +127,7 @@ agents:
             results_dir, adapter_kwargs, _ = resolve_script_runtime_options(
                 args=args,
                 script_name="phase3",
-                default_results_dir="agent_evaluation_results",
+                default_results_dir="artifacts/mini-agent/phase3",
             )
 
         self.assertEqual(results_dir, "phase3_alias")
@@ -163,7 +163,7 @@ agents:
             results_dir, adapter_kwargs, _ = resolve_script_runtime_options(
                 args=args,
                 script_name="run_single_test",
-                default_results_dir="phase3",
+                default_results_dir="artifacts/mini-agent/phase3/single_test",
             )
 
         self.assertEqual(results_dir, "phase3_my_custom")
@@ -186,7 +186,7 @@ agents:
         _, adapter_kwargs, _ = resolve_script_runtime_options(
             args=args,
             script_name="phase1",
-            default_results_dir="integrated_evaluation_results",
+            default_results_dir="artifacts/mini-agent/phase1",
         )
         self.assertEqual(adapter_kwargs["executable"], "/tmp/custom-agent")
         self.assertEqual(adapter_kwargs["extra_args"], ["--json"])
@@ -207,10 +207,10 @@ agents:
         results_dir, adapter_kwargs, source = resolve_script_runtime_options(
             args=args,
             script_name="phase1",
-            default_results_dir="integrated_evaluation_results",
+            default_results_dir="artifacts/mini-agent/phase1",
         )
 
-        self.assertEqual(results_dir, "integrated_evaluation_results")
+        self.assertEqual(results_dir, "artifacts/mini-agent/phase1")
         self.assertIsNone(source)
         self.assertEqual(adapter_kwargs, {})
 
