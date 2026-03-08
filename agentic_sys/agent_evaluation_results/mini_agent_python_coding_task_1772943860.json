@@ -1,0 +1,139 @@
+{
+  "schema_version": "phase3.v2",
+  "test_case": {
+    "name": "python_coding_task",
+    "category": "coding",
+    "description": "Write, execute, and debug a Python script",
+    "task_prompt": "I need help creating a Python script that:\n1. Defines a function called 'calculate_fibonacci' that takes a number n and returns the nth Fibonacci number\n2. Tests the function with n=10\n3. Saves the script as 'fibonacci.py'\n4. Runs the script to show it works correctly\n5. If there are any errors, fix them\n\nPlease show me the complete process including testing."
+  },
+  "clear_metrics": {
+    "llm_api_calls": 6,
+    "total_tokens_used": 1055,
+    "tool_executions": 0,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.00811,
+    "cost_is_estimated": true,
+    "context_window_usage": 0.0,
+    "total_task_time": 20.049015998840332,
+    "agent_thinking_time": 17.18,
+    "tool_execution_time": 1.91,
+    "llm_response_time": 17.18,
+    "steps_to_completion": 3,
+    "supports_structured_trace": true,
+    "trace_signal_quality": 1.0,
+    "time_breakdown_is_estimated": true,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 0.6666666666666666,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 132.4375,
+    "cpu_usage_percent": 0.21749999999999997,
+    "steps_per_second": 0.149633278769069,
+    "task_completion_accuracy": 1.0,
+    "output_quality_score": 0.8499999999999999,
+    "reasoning_coherence": 0.4,
+    "tool_usage_correctness": 0.8666666666666667,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 1.0,
+    "error_recovery_effectiveness": 1.0,
+    "response_consistency": 0.0,
+    "response_consistency_measured": false,
+    "system_stability": 1.0
+  },
+  "execution": {
+    "tools_used": [
+      "write_file",
+      "bash"
+    ],
+    "steps_taken": 3,
+    "success": 1.0,
+    "output_length": 6150
+  },
+  "performance": {
+    "overall_clear_score": 0.8484991720610975,
+    "passed_thresholds": true,
+    "dimension_scores": {
+      "cost": 1.0,
+      "latency": 0.8329248666763306,
+      "efficiency": 0.8835572916666666,
+      "assurance": 0.7791666666666667,
+      "reliability": 1.0
+    }
+  },
+  "time_breakdown": {
+    "llm_inference_s": 17.18,
+    "tool_execution_s": 1.91,
+    "coordination_s": 0.96,
+    "llm_inference_pct": 85.7,
+    "tool_execution_pct": 9.5,
+    "coordination_pct": 4.8,
+    "method": "timeline_weighted",
+    "is_estimated": true,
+    "llm_events": 6,
+    "tool_events": 2,
+    "coord_events": 0
+  },
+  "step_resource_profiles": [
+    {
+      "step": 1,
+      "event_type": "thinking",
+      "time_offset_s": 5.85,
+      "cpu_percent": 0.0,
+      "memory_mb": 130.7
+    },
+    {
+      "step": 1,
+      "event_type": "assistant_response",
+      "time_offset_s": 9.82,
+      "cpu_percent": 0.0,
+      "memory_mb": 130.7
+    },
+    {
+      "step": 1,
+      "event_type": "tool_result",
+      "time_offset_s": 11.9,
+      "cpu_percent": 0.0,
+      "memory_mb": 130.7
+    },
+    {
+      "step": 2,
+      "event_type": "thinking",
+      "time_offset_s": 13.57,
+      "cpu_percent": 0.3,
+      "memory_mb": 132.4
+    },
+    {
+      "step": 2,
+      "event_type": "assistant_response",
+      "time_offset_s": 14.2,
+      "cpu_percent": 0.0,
+      "memory_mb": 132.4
+    },
+    {
+      "step": 2,
+      "event_type": "tool_result",
+      "time_offset_s": 16.08,
+      "cpu_percent": 0.0,
+      "memory_mb": 131.7
+    },
+    {
+      "step": 3,
+      "event_type": "thinking",
+      "time_offset_s": 19.42,
+      "cpu_percent": 0.0,
+      "memory_mb": 131.7
+    },
+    {
+      "step": 3,
+      "event_type": "assistant_response",
+      "time_offset_s": 20.05,
+      "cpu_percent": 0.0,
+      "memory_mb": 131.7
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udd27 Improve tool selection - accuracy 0.67",
+    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking",
+    "\ud83d\udcb2 Cost is estimated (not provider-reported) and excluded from strict scoring"
+  ],
+  "timestamp": 1772943860
+}

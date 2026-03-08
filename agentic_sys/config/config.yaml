@@ -1,0 +1,66 @@
+version: 2
+
+agents:
+  mini-agent:
+    aliases: [mini]
+    scripts:
+      phase1:
+        results_dir: integrated_evaluation_results
+      phase2:
+        results_dir: enhanced_evaluation_results
+      phase3:
+        results_dir: agent_evaluation_results
+      run_single_test:
+        results_dir: phase3
+    adapter:
+      type: mini-agent
+      executable:
+      conda_env:
+      extra_args: []
+
+  continue:
+    aliases: [continue-cn, cn]
+    scripts:
+      phase1:
+        results_dir: phase1_continue
+      phase2:
+        results_dir: phase2_continue
+      phase3:
+        results_dir: phase3_continue
+      run_single_test:
+        results_dir: phase3_continue_single
+    adapter:
+      type: continue-cn
+      executable:
+      agent_name:
+      config_path: continuedev/default-cli-config
+      model_slugs: []
+      allow_policies: []
+      extra_args: []
+
+  # Example: add a new agent with YAML only (no adapter/registry code changes).
+  example-generic:
+    aliases: [example]
+    scripts:
+      phase1:
+        results_dir: phase1_example
+      phase2:
+        results_dir: phase2_example
+      phase3:
+        results_dir: phase3_example
+      run_single_test:
+        results_dir: phase3_example_single
+    adapter:
+      type: generic-cli
+      agent_id: example-generic
+      process_name_hint: example-agent
+      command:
+        - example-agent
+        - --workspace
+        - "{workspace}"
+        - --task
+        - "{task_prompt}"
+      extra_args: []
+      env: {}
+      cwd: "{workspace}"
+      success_codes: [0]

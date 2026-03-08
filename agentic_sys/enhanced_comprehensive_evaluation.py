@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Comprehensive Mini-Agent Evaluation
-===========================================
+Enhanced Comprehensive Agent Evaluation
+======================================
 Integrates:
 1. Reasoning-focused tests to improve step-by-step demonstration
 2. Real-time system monitoring for bottleneck identification  
@@ -10,8 +10,8 @@ Integrates:
 """
 
 import asyncio
+import argparse
 import json
-import subprocess
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -23,6 +23,10 @@ from advanced_evaluation_system import AdvancedEvaluator, EvaluationResult
 from realtime_system_monitor import RealTimeSystemMonitor, PerformanceAnalysis
 from reasoning_focused_tests import create_reasoning_enhanced_test_suite, create_system_stress_tests
 from integrated_mini_agent_evaluation import TestCaseDefinition, ComprehensiveTestResult
+from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
+from agent_runtime.factory import create_agent_adapter
+from agent_runtime.models import AgentExecutionRequest
+from agent_runtime.script_config import resolve_script_runtime_options
 
 @dataclass
 class EnhancedTestResult:
@@ -30,8 +34,8 @@ class EnhancedTestResult:
     # Original test result data
     test_case: TestCaseDefinition
     total_execution_time: float
-    mini_agent_output: str
-    mini_agent_error: Optional[str]
+    agent_output: str
+    agent_error: Optional[str]
     execution_success: bool
     evaluation_result: EvaluationResult
     overall_success: bool
@@ -47,13 +51,30 @@ class EnhancedTestResult:
     tool_usage_intensity: str   # "intensive", "moderate", "minimal"
     reasoning_quality_category: str  # "excellent", "good", "fair", "poor"
 
-class EnhancedMiniAgentEvaluator:
+class EnhancedAgentEvaluator:
     """Enhanced evaluator with reasoning focus and real-time monitoring"""
     
-    def __init__(self, results_dir: str = "enhanced_evaluation_results"):
+    def __init__(
+        self,
+        results_dir: str = "enhanced_evaluation_results",
+        agent_adapter: Optional[AgentAdapter] = None,
+    ):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
         self.evaluator = AdvancedEvaluator(use_llm_judge=False)
+        self.agent_adapter = agent_adapter or MiniAgentAdapter()
+
+    def _run_agent_with_pid_binding(self, request: AgentExecutionRequest, monitor: RealTimeSystemMonitor):
+        """Prefer early PID binding via callback; fall back for legacy adapters."""
+        try:
+            return self.agent_adapter.run(request, on_process_start=monitor.set_target_pid)
+        except TypeError as exc:
+            if "on_process_start" not in str(exc):
+                raise
+            execution = self.agent_adapter.run(request)
+            if execution.pid is not None:
+                monitor.set_target_pid(execution.pid)
+            return execution
         
     def create_enhanced_test_suite(self, include_stress_tests: bool = True) -> List[TestCaseDefinition]:
         """Create comprehensive test suite with reasoning and stress tests"""
@@ -79,16 +100,16 @@ class EnhancedMiniAgentEvaluator:
     
     def _get_original_tests(self) -> List[TestCaseDefinition]:
         """Get the original 5 baseline tests for comparison"""
-        from integrated_mini_agent_evaluation import IntegratedMiniAgentEvaluator
+        from integrated_mini_agent_evaluation import IntegratedAgentEvaluator
         
-        baseline_evaluator = IntegratedMiniAgentEvaluator()
+        baseline_evaluator = IntegratedAgentEvaluator()
         original_tests = baseline_evaluator.create_comprehensive_test_suite()
         return original_tests
     
     async def run_enhanced_evaluation(self, test_categories: Optional[List[str]] = None) -> List[EnhancedTestResult]:
         """Run enhanced evaluation with real-time monitoring"""
         
-        print("🚀 Enhanced Mini-Agent Comprehensive Evaluation")
+        print("🚀 Enhanced Agent Comprehensive Evaluation")
         print("=" * 80)
         print("🧠 Focus: Explicit reasoning + Real-time bottleneck analysis")
         print("📊 Monitoring: CPU, Memory, Disk, Network, Process metrics")
@@ -106,6 +127,11 @@ class EnhancedMiniAgentEvaluator:
                     filtered_tests.append(test)
             all_tests = filtered_tests
             print(f"🔍 Filtered to {len(all_tests)} tests matching categories: {test_categories}")
+
+        if not all_tests:
+            print("⚠️ No tests matched the current filters. Writing empty summary report.")
+            await self._generate_enhanced_analysis([])
+            return []
         
         results = []
         
@@ -134,71 +160,42 @@ class EnhancedMiniAgentEvaluator:
         monitor = RealTimeSystemMonitor(sample_interval=0.2)  # High-frequency sampling
         
         with tempfile.TemporaryDirectory() as temp_workspace:
-            
-            # Start enhanced monitoring
-            monitor.start_monitoring("mini-agent")
-            start_time = time.time()
-            
-            mini_agent_output = ""
-            mini_agent_error = None
+            # Start enhanced monitoring and always stop in finally.
+            monitor.start_monitoring(self.agent_adapter.process_name_hint)
+            started_at = time.time()
+
+            agent_output = ""
+            agent_error = None
             execution_success = False
-            
-            process = None
+            execution_time = 0.0
+
             try:
                 print(f"🔍 Starting real-time monitoring...")
-                print(f"🚀 Executing: mini-agent --workspace {temp_workspace} --task")
-                
-                # Execute Mini-Agent and attach monitor to the spawned PID.
-                process = subprocess.Popen([
-                    "mini-agent",
-                    "--workspace", temp_workspace,
-                    "--task", test_case.task_prompt
-                ],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
+                request = AgentExecutionRequest(
+                    task_prompt=test_case.task_prompt,
+                    workspace=temp_workspace,
+                    timeout_seconds=test_case.max_time_seconds,
                 )
-                monitor.set_target_pid(process.pid)
+                execution = self._run_agent_with_pid_binding(request, monitor)
 
-                stdout, stderr = process.communicate(timeout=test_case.max_time_seconds)
-                
-                end_time = time.time()
-                execution_time = end_time - start_time
-                
-                mini_agent_output = stdout or ""
-                mini_agent_error = stderr if stderr else None
-                execution_success = process.returncode == 0
-                
-            except subprocess.TimeoutExpired:
-                if process is not None:
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                    mini_agent_output = stdout or ""
-                    if stderr:
-                        mini_agent_error = stderr
-                end_time = time.time()
-                execution_time = end_time - start_time
-                timeout_msg = f"Test timed out after {test_case.max_time_seconds} seconds"
-                mini_agent_error = f"{mini_agent_error}\n{timeout_msg}" if mini_agent_error else timeout_msg
+                execution_time = execution.execution_time_seconds
+                agent_output = execution.stdout or ""
+                agent_error = execution.stderr or None
+                execution_success = execution.success
+                print(f"🚀 Executing: {' '.join(execution.command[:4])} ...")
+            except Exception as exc:
+                execution_time = max(time.time() - started_at, 0.0)
+                agent_error = f"Execution error: {exc}"
                 execution_success = False
-                
-            except Exception as e:
-                end_time = time.time()
-                execution_time = end_time - start_time
-                mini_agent_error = str(e)
-                execution_success = False
-            
-            # Stop monitoring and get analysis
-            performance_analysis = monitor.stop_monitoring()
+            finally:
+                performance_analysis = monitor.stop_monitoring()
             
             print(f"📊 Execution: {execution_time:.1f}s | Monitoring: {performance_analysis.sample_count} samples")
             
             # Run advanced evaluation
             evaluation_result = self.evaluator.evaluate_response(
                 task_prompt=test_case.task_prompt,
-                agent_response=mini_agent_output,
+                agent_response=agent_output,
                 criteria=test_case.evaluation_criteria,
                 execution_time=execution_time,
                 workspace_path=temp_workspace
@@ -206,15 +203,15 @@ class EnhancedMiniAgentEvaluator:
             
             # Enhanced analysis
             enhanced_metrics = self._analyze_enhanced_metrics(
-                mini_agent_output, performance_analysis, evaluation_result
+                agent_output, performance_analysis, evaluation_result
             )
             
             # Create enhanced result
             result = EnhancedTestResult(
                 test_case=test_case,
                 total_execution_time=execution_time,
-                mini_agent_output=mini_agent_output,
-                mini_agent_error=mini_agent_error,
+                agent_output=agent_output,
+                agent_error=agent_error,
                 execution_success=execution_success,
                 evaluation_result=evaluation_result,
                 overall_success=execution_success and evaluation_result.passed,
@@ -285,7 +282,7 @@ class EnhancedMiniAgentEvaluator:
         
         # Create comprehensive result data
         result_data = {
-            "schema_version": "phase2.v2",
+            "schema_version": "phase2.v3",
             "test_info": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,
@@ -296,8 +293,8 @@ class EnhancedMiniAgentEvaluator:
             "execution": {
                 "total_time": result.total_execution_time,
                 "success": result.execution_success,
-                "error": result.mini_agent_error,
-                "output_length": len(result.mini_agent_output)
+                "error": result.agent_error,
+                "output_length": len(result.agent_output)
             },
             "evaluation": asdict(result.evaluation_result),
             "performance_monitoring": asdict(result.performance_analysis),
@@ -322,6 +319,30 @@ class EnhancedMiniAgentEvaluator:
         
         timestamp = time.strftime("%Y%m%d_%H%M%S")
         report_path = self.results_dir / f"enhanced_analysis_{timestamp}.md"
+
+        if not results:
+            report = f"""# Enhanced Agent Comprehensive Evaluation Report
+Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+## Summary
+
+No tests were executed (likely due to category filters).
+"""
+            with open(report_path, 'w') as f:
+                f.write(report)
+
+            print(f"\n📊 Enhanced analysis complete!")
+            print(f"📄 Full report: {report_path}")
+            print(f"📁 Individual results: {self.results_dir}")
+            print("\n" + "=" * 80)
+            print("ENHANCED EVALUATION SUMMARY")
+            print("=" * 80)
+            print("Success Rate: 0/0 (0.0%)")
+            print("Reasoning Quality: n/a")
+            print("Primary Bottleneck: n/a")
+            print("System Efficiency: n/a")
+            print("=" * 80)
+            return
         
         # Calculate comprehensive statistics
         total_tests = len(results)
@@ -362,12 +383,12 @@ class EnhancedMiniAgentEvaluator:
             tool_intensity_counts[tool_intensity] = tool_intensity_counts.get(tool_intensity, 0) + 1
         
         # Generate enhanced report
-        report = f"""# Enhanced Mini-Agent Comprehensive Evaluation Report
+        report = f"""# Enhanced Agent Comprehensive Evaluation Report
 Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Executive Summary
 
-This enhanced evaluation combines explicit reasoning assessment with real-time system monitoring to identify both response quality patterns and performance bottlenecks in Mini-Agent.
+This enhanced evaluation combines explicit reasoning assessment with real-time system monitoring to identify both response quality patterns and performance bottlenecks in the configured runtime.
 
 ### 🎯 Overall Performance
 
@@ -492,7 +513,7 @@ This enhanced evaluation combines explicit reasoning assessment with real-time s
 
 ---
 
-*Report generated by Enhanced Mini-Agent Evaluation System v2.0*
+*Report generated by Enhanced Agent Evaluation System v2.0*
 *Combining reasoning analysis with real-time performance monitoring*
 """
         
@@ -514,17 +535,91 @@ This enhanced evaluation combines explicit reasoning assessment with real-time s
         print(f"System Efficiency: CPU {avg_cpu:.1f}%, Memory {avg_memory:.1f}%")
         print("=" * 80)
 
-async def main():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run phase2 enhanced evaluation.")
+    parser.add_argument(
+        "--agent",
+        default="mini-agent",
+        help="Runtime adapter key/alias.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default=None,
+        help="Directory where phase2 outputs are written.",
+    )
+    parser.add_argument(
+        "--agent-config",
+        default=None,
+        help="Optional path to agent config YAML (defaults to config/config.yaml).",
+    )
+    parser.add_argument(
+        "--adapter-option",
+        action="append",
+        default=None,
+        help="Repeatable adapter override in KEY=VALUE form (parsed as YAML scalars/lists).",
+    )
+    parser.add_argument(
+        "--category",
+        action="append",
+        default=[],
+        help="Optional category filter (repeatable).",
+    )
+    parser.add_argument(
+        "--continue-agent-name",
+        default=None,
+        help="Continue agent name for `cn --agent <name>`.",
+    )
+    parser.add_argument(
+        "--continue-config",
+        default=None,
+        help="Continue config path or hub slug for `cn --config`.",
+    )
+    parser.add_argument(
+        "--continue-model",
+        action="append",
+        default=None,
+        help="Repeatable Continue model slug for `cn --model`.",
+    )
+    parser.add_argument(
+        "--continue-allow",
+        action="append",
+        default=None,
+        help="Repeatable Continue allow policy, e.g. --continue-allow edit.",
+    )
+    parser.add_argument(
+        "--continue-extra-arg",
+        action="append",
+        default=None,
+        help="Repeatable raw arg appended to Continue CLI command.",
+    )
+    return parser
+
+
+async def main(argv: Optional[List[str]] = None):
     """Main execution function for enhanced evaluation"""
+    args = _build_arg_parser().parse_args(argv)
+    results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
+        args=args,
+        script_name="phase2",
+        default_results_dir="enhanced_evaluation_results",
+    )
+    adapter = create_agent_adapter(
+        agent=args.agent,
+        **adapter_kwargs,
+    )
+    evaluator = EnhancedAgentEvaluator(
+        results_dir=results_dir,
+        agent_adapter=adapter,
+    )
     
-    evaluator = EnhancedMiniAgentEvaluator()
+    print("🚀 Enhanced Agent Comprehensive Evaluation")
+    print(f"Using adapter: {adapter.agent_id}")
+    if config_source:
+        print(f"Using config: {config_source}")
     
-    print("🚀 Enhanced Mini-Agent Comprehensive Evaluation")
-    print("Combining reasoning assessment with real-time performance monitoring")
-    
-    # Run enhanced evaluation (you can filter by categories)
-    # results = await evaluator.run_enhanced_evaluation(test_categories=["reasoning"])  # Just reasoning tests
-    results = await evaluator.run_enhanced_evaluation()  # All tests
+    results = await evaluator.run_enhanced_evaluation(
+        test_categories=args.category or None
+    )
     
     print(f"\n🎯 Enhanced evaluation complete! Analyzed {len(results)} tests with real-time monitoring.")
 

@@ -498,24 +498,50 @@ Provide only the numerical score (0.0-1.0):"""
         """Evaluate technical execution success"""
         
         score = 0.5  # Start with neutral
-        
-        # Check for error indicators in response
-        error_indicators = ['error', 'fail', 'exception', 'traceback', 'cannot', "can't"]
-        error_count = sum(1 for indicator in error_indicators if indicator in response.lower())
-        
-        if error_count == 0:
-            score += 0.3  # No obvious errors
-        elif error_count <= 2:
-            score += 0.1  # Few errors
-        else:
-            score -= 0.2  # Many errors
+
+        response_lower = (response or "").lower()
+
+        # Focus on unresolved failure signatures to avoid punishing "error fixed" narratives.
+        unresolved_failure_patterns = [
+            r"traceback \(most recent call last\)",
+            r"\buncaught exception\b",
+            r"\bexecution failed\b",
+            r"\bfailed to\b",
+            r"\bunable to\b",
+            r"\bcannot\b",
+            r"\bcan't\b",
+        ]
+        unresolved_failures = sum(
+            1 for pattern in unresolved_failure_patterns if re.search(pattern, response_lower)
+        )
+
+        remediation_indicators = [
+            "fixed",
+            "resolved",
+            "now works",
+            "after fixing",
+            "after resolving",
+            "successfully",
+        ]
+        remediation_count = sum(1 for indicator in remediation_indicators if indicator in response_lower)
+
+        if unresolved_failures == 0:
+            score += 0.2
+        elif unresolved_failures == 1 and remediation_count > 0:
+            score += 0.1
+        elif unresolved_failures >= 2 and remediation_count == 0:
+            score -= 0.2
         
         # Check for completion indicators
         completion_indicators = ['completed', 'finished', 'done', 'success', 'result']
-        completion_count = sum(1 for indicator in completion_indicators if indicator in response.lower())
+        completion_count = sum(1 for indicator in completion_indicators if indicator in response_lower)
         
         if completion_count > 0:
             score += 0.2
+
+        # Positive signal when failures are explicitly addressed.
+        if remediation_count > 0:
+            score += 0.1
         
         # If workspace provided, check for expected outputs
         if workspace_path and Path(workspace_path).exists():

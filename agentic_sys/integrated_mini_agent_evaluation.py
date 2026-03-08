@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-Integrated Mini-Agent Evaluation System
-======================================
-Combines our advanced evaluation system with Mini-Agent testing for research-quality analysis.
+Integrated Agent Evaluation System
+=================================
+Combines our advanced evaluation system with pluggable agent runtimes for research-quality analysis.
 
 This integrates:
 1. Advanced multi-methodology evaluation (MMLU, HumanEval, LLM-judge, etc.)
-2. Mini-Agent task execution via --task parameter
+2. Agent task execution via adapter abstraction
 3. Comprehensive performance monitoring
 4. Research-grade reporting
 """
 
 import asyncio
+import argparse
 import json
 import re
-import subprocess
 import tempfile
 import time
 from dataclasses import asdict, dataclass
@@ -27,6 +27,10 @@ from advanced_evaluation_system import (
     EvaluationCriteria, 
     EvaluationResult
 )
+from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
+from agent_runtime.factory import create_agent_adapter
+from agent_runtime.models import AgentExecutionRequest
+from agent_runtime.script_config import resolve_script_runtime_options
 
 @dataclass
 class TestCaseDefinition:
@@ -46,8 +50,8 @@ class ComprehensiveTestResult:
     
     # Execution metrics
     total_execution_time: float
-    mini_agent_output: str
-    mini_agent_error: Optional[str]
+    agent_output: str
+    agent_error: Optional[str]
     execution_success: bool
     
     # Advanced evaluation results
@@ -57,13 +61,18 @@ class ComprehensiveTestResult:
     overall_success: bool
     confidence_score: float
 
-class IntegratedMiniAgentEvaluator:
-    """Integrated evaluator combining Mini-Agent execution with advanced assessment"""
+class IntegratedAgentEvaluator:
+    """Integrated evaluator combining agent execution with advanced assessment."""
     
-    def __init__(self, results_dir: str = "integrated_evaluation_results"):
+    def __init__(
+        self,
+        results_dir: str = "integrated_evaluation_results",
+        agent_adapter: Optional[AgentAdapter] = None,
+    ):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
         self.evaluator = AdvancedEvaluator(use_llm_judge=False)  # Using heuristic for now
+        self.agent_adapter = agent_adapter or MiniAgentAdapter()
         
     def create_comprehensive_test_suite(self) -> List[TestCaseDefinition]:
         """Create test cases with appropriate evaluation criteria for each"""
@@ -233,7 +242,7 @@ Provide reasoning for each recommendation.""",
         return test_cases
     
     async def run_single_integrated_test(self, test_case: TestCaseDefinition) -> ComprehensiveTestResult:
-        """Run a single test with Mini-Agent and evaluate comprehensively"""
+        """Run a single test with the configured agent adapter and evaluate comprehensively."""
         
         print(f"\n🧪 Running: {test_case.name} ({test_case.complexity})")
         print(f"📋 {test_case.description}")
@@ -241,56 +250,31 @@ Provide reasoning for each recommendation.""",
         # Create temporary workspace
         with tempfile.TemporaryDirectory() as temp_workspace:
             
-            start_time = time.time()
-            mini_agent_output = ""
-            mini_agent_error = None
+            agent_output = ""
+            agent_error = None
             execution_success = False
             
-            try:
-                # Execute Mini-Agent with the test task
-                print(f"🚀 Executing: mini-agent --workspace {temp_workspace} --task")
-                
-                process = subprocess.run([
-                    "mini-agent",
-                    "--workspace", temp_workspace,
-                    "--task", test_case.task_prompt
-                ], 
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=test_case.max_time_seconds
-                )
-                
-                end_time = time.time()
-                execution_time = end_time - start_time
-                
-                mini_agent_output = process.stdout
-                mini_agent_error = process.stderr if process.stderr else None
-                execution_success = process.returncode == 0
-                
-                print(f"⏱️ Execution completed in {execution_time:.1f}s")
-                print(f"📊 Return code: {process.returncode}")
-                
-            except subprocess.TimeoutExpired:
-                end_time = time.time()
-                execution_time = end_time - start_time
-                mini_agent_error = f"Test timed out after {test_case.max_time_seconds} seconds"
-                execution_success = False
-                print(f"⏰ Timed out after {execution_time:.1f}s")
-                
-            except Exception as e:
-                end_time = time.time()
-                execution_time = end_time - start_time
-                mini_agent_error = str(e)
-                execution_success = False
-                print(f"❌ Error: {e}")
+            # Execute runtime through adapter abstraction.
+            request = AgentExecutionRequest(
+                task_prompt=test_case.task_prompt,
+                workspace=temp_workspace,
+                timeout_seconds=test_case.max_time_seconds,
+            )
+            execution = self.agent_adapter.run(request)
+            execution_time = execution.execution_time_seconds
+            agent_output = execution.stdout or ""
+            agent_error = execution.stderr or None
+            execution_success = execution.success
+
+            print(f"🚀 Executing: {' '.join(execution.command[:4])} ...")
+            print(f"⏱️ Execution completed in {execution_time:.1f}s")
+            print(f"📊 Return code: {execution.return_code}")
             
             # Run advanced evaluation on the output
             print(f"📊 Running advanced evaluation...")
             evaluation_result = self.evaluator.evaluate_response(
                 task_prompt=test_case.task_prompt,
-                agent_response=mini_agent_output,
+                agent_response=agent_output,
                 criteria=test_case.evaluation_criteria,
                 execution_time=execution_time,
                 workspace_path=temp_workspace
@@ -304,8 +288,8 @@ Provide reasoning for each recommendation.""",
             result = ComprehensiveTestResult(
                 test_case=test_case,
                 total_execution_time=execution_time,
-                mini_agent_output=mini_agent_output,
-                mini_agent_error=mini_agent_error,
+                agent_output=agent_output,
+                agent_error=agent_error,
                 execution_success=execution_success,
                 evaluation_result=evaluation_result,
                 overall_success=overall_success,
@@ -322,9 +306,9 @@ Provide reasoning for each recommendation.""",
     async def run_comprehensive_evaluation(self) -> List[ComprehensiveTestResult]:
         """Run the full comprehensive evaluation suite"""
         
-        print("🔬 Integrated Mini-Agent Comprehensive Evaluation")
+        print("🔬 Integrated Agent Comprehensive Evaluation")
         print("=" * 80)
-        print("Testing Mini-Agent with research-grade evaluation methodology")
+        print("Testing configured runtime with research-grade evaluation methodology")
         print("=" * 80)
         
         test_cases = self.create_comprehensive_test_suite()
@@ -352,14 +336,14 @@ Provide reasoning for each recommendation.""",
         filepath = self.results_dir / filename
         
         # Convert to JSON-serializable format
-        preview = result.mini_agent_output
+        preview = result.agent_output
         # Remove ANSI control sequences and truncate for compact, portable artifacts.
         preview = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", preview)
         if len(preview) > 500:
             preview = preview[:500] + "..."
 
         result_dict = {
-            "schema_version": "phase1.v2",
+            "schema_version": "phase1.v3",
             "test_case": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,
@@ -371,8 +355,8 @@ Provide reasoning for each recommendation.""",
             "execution": {
                 "total_execution_time": result.total_execution_time,
                 "execution_success": result.execution_success,
-                "mini_agent_error": result.mini_agent_error,
-                "output_length": len(result.mini_agent_output),
+                "agent_error": result.agent_error,
+                "output_length": len(result.agent_output),
                 "output_preview": preview
             },
             "evaluation": {
@@ -431,19 +415,19 @@ Provide reasoning for each recommendation.""",
             complexity_performance[complexity].append(result.evaluation_result.overall_score)
         
         # Generate comprehensive report
-        report = f"""# Integrated Mini-Agent Comprehensive Evaluation Report
+        report = f"""# Integrated Agent Comprehensive Evaluation Report
 Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Executive Summary
 
-This report presents a comprehensive evaluation of Mini-Agent using research-grade methodology combining multiple benchmark approaches (MMLU, HumanEval, LLM-as-Judge, SWE-Agent, Chain-of-Thought).
+This report presents a comprehensive evaluation of the configured runtime using research-grade methodology combining multiple benchmark approaches (MMLU, HumanEval, LLM-as-Judge, SWE-Agent, Chain-of-Thought).
 
 ### Key Performance Indicators
 
 | Metric | Value | Analysis |
 |--------|-------|----------|
 | **Overall Success Rate** | {overall_success_count}/{total_tests} ({overall_success_count/total_tests*100:.1f}%) | Combined execution + evaluation success |
-| **Execution Success Rate** | {execution_success_count}/{total_tests} ({execution_success_count/total_tests*100:.1f}%) | Mini-Agent technical execution |
+| **Execution Success Rate** | {execution_success_count}/{total_tests} ({execution_success_count/total_tests*100:.1f}%) | Runtime technical execution |
 | **Evaluation Pass Rate** | {evaluation_pass_count}/{total_tests} ({evaluation_pass_count/total_tests*100:.1f}%) | Response quality assessment |
 | **Average Response Quality** | {avg_overall_score:.3f}/1.000 | Multi-criteria evaluation score |
 | **Average Execution Time** | {avg_execution_time:.1f} seconds | Time efficiency |
@@ -495,7 +479,7 @@ This report presents a comprehensive evaluation of Mini-Agent using research-gra
 """
         strengths: List[str] = []
         if avg_correctness >= 0.7:
-            strengths.append("✅ **Strong factual accuracy** - Mini-Agent provides correct answers consistently")
+            strengths.append("✅ **Strong factual accuracy** - runtime provides correct answers consistently")
         if avg_reasoning >= 0.6:
             strengths.append("✅ **Good reasoning demonstration** - Shows step-by-step thinking process")
         if avg_execution_time <= 60:
@@ -572,7 +556,7 @@ The evaluation framework provides confidence estimates and detailed component an
 
 ---
 
-*Report generated by Integrated Mini-Agent Evaluation System v1.0*
+*Report generated by Integrated Agent Evaluation System v1.0*
 *Evaluation framework based on established academic benchmarks*
 """
         
@@ -594,13 +578,81 @@ The evaluation framework provides confidence estimates and detailed component an
         print(f"Evaluation Confidence: {avg_confidence:.3f}/1.000")
         print("=" * 80)
 
-async def main():
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run phase1 integrated evaluation.")
+    parser.add_argument(
+        "--agent",
+        default="mini-agent",
+        help="Runtime adapter key/alias.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default=None,
+        help="Directory where phase1 outputs are written.",
+    )
+    parser.add_argument(
+        "--agent-config",
+        default=None,
+        help="Optional path to agent config YAML (defaults to config/config.yaml).",
+    )
+    parser.add_argument(
+        "--adapter-option",
+        action="append",
+        default=None,
+        help="Repeatable adapter override in KEY=VALUE form (parsed as YAML scalars/lists).",
+    )
+    parser.add_argument(
+        "--continue-agent-name",
+        default=None,
+        help="Continue agent name for `cn --agent <name>`.",
+    )
+    parser.add_argument(
+        "--continue-config",
+        default=None,
+        help="Continue config path or hub slug for `cn --config`.",
+    )
+    parser.add_argument(
+        "--continue-model",
+        action="append",
+        default=None,
+        help="Repeatable Continue model slug for `cn --model`.",
+    )
+    parser.add_argument(
+        "--continue-allow",
+        action="append",
+        default=None,
+        help="Repeatable Continue allow policy, e.g. --continue-allow edit.",
+    )
+    parser.add_argument(
+        "--continue-extra-arg",
+        action="append",
+        default=None,
+        help="Repeatable raw arg appended to Continue CLI command.",
+    )
+    return parser
+
+
+async def main(argv: Optional[List[str]] = None):
     """Main execution function"""
+    args = _build_arg_parser().parse_args(argv)
+    results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
+        args=args,
+        script_name="phase1",
+        default_results_dir="integrated_evaluation_results",
+    )
+    adapter = create_agent_adapter(
+        agent=args.agent,
+        **adapter_kwargs,
+    )
+    evaluator = IntegratedAgentEvaluator(
+        results_dir=results_dir,
+        agent_adapter=adapter,
+    )
     
-    evaluator = IntegratedMiniAgentEvaluator()
-    
-    print("🚀 Starting Integrated Mini-Agent Comprehensive Evaluation")
-    print("This combines advanced multi-methodology evaluation with Mini-Agent testing")
+    print("🚀 Starting Integrated Agent Comprehensive Evaluation")
+    print(f"Using adapter: {adapter.agent_id}")
+    if config_source:
+        print(f"Using config: {config_source}")
     
     results = await evaluator.run_comprehensive_evaluation()
     

@@ -150,7 +150,7 @@ class RealTimeSystemMonitor:
         self.target_process_name = target_process_name
         self.target_process = None
         
-        # Find target process (Mini-Agent)
+        # Find target process by provided runtime hint.
         self._find_target_process(target_process_name)
         
         # Start monitoring thread
@@ -184,22 +184,38 @@ class RealTimeSystemMonitor:
     
     def _find_target_process(self, process_name: str):
         """Find the target process to monitor"""
-        name_hint = (process_name or "").lower()
+        name_hint = Path((process_name or "").strip()).name.lower()
 
         for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
             try:
                 proc_name = (proc.info.get('name') or '').lower()
                 cmd_parts = proc.info.get('cmdline') or []
-                cmdline = ' '.join(cmd_parts).lower()
+                cmd_tokens = {
+                    Path(part).name.lower()
+                    for part in cmd_parts
+                    if part
+                }
 
-                # Match either by explicit hint or by known mini-agent markers.
-                hint_match = name_hint and (name_hint in proc_name or name_hint in cmdline)
-                mini_agent_match = (
-                    'mini-agent' in proc_name or
-                    any(Path(part).name.lower() in {'mini-agent', 'mini-agent.exe'} for part in cmd_parts)
-                )
+                # Match by explicit adapter hint.
+                hint_match = False
+                if name_hint:
+                    if len(name_hint) <= 3:
+                        # Avoid broad substring matches for short hints like "cn".
+                        hint_match = (proc_name == name_hint) or (name_hint in cmd_tokens)
+                    else:
+                        hint_match = (
+                            name_hint == proc_name
+                            or name_hint in proc_name
+                            or name_hint in cmd_tokens
+                        )
+                else:
+                    # Backward-compatible fallback if caller provided no hint.
+                    hint_match = (
+                        'mini-agent' in proc_name or
+                        any(Path(part).name.lower() in {'mini-agent', 'mini-agent.exe'} for part in cmd_parts)
+                    )
 
-                if hint_match or mini_agent_match:
+                if hint_match:
                     self.target_process = psutil.Process(proc.info['pid'])
                     # Prime CPU stats so subsequent cpu_percent values are meaningful.
                     self.target_process.cpu_percent(interval=None)

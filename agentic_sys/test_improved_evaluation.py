@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Test script for the improved Mini-Agent evaluation system
+Test script for the improved agent evaluation system.
 """
 
 import asyncio
 import logging
-from mini_agent_clear_evaluation_system import MiniAgentCLEAREvaluator, MiniAgentTestCase, MiniAgentTestCriteria
+from mini_agent_clear_evaluation_system import AgentCLEAREvaluator, AgentTestCase, AgentTestCriteria
 
 async def test_simple_case():
     """Test the improved evaluation system with a simple case"""
@@ -14,15 +14,15 @@ async def test_simple_case():
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     
     # Create evaluator
-    evaluator = MiniAgentCLEAREvaluator()
+    evaluator = AgentCLEAREvaluator()
     
     # Create a simple test case
-    test_case = MiniAgentTestCase(
+    test_case = AgentTestCase(
         name="test_file_operations",
         category="file_operations", 
         description="Simple file creation test",
         task_prompt="Create a file called 'hello.txt' with content 'Hello World' and then read it back.",
-        evaluation_criteria=MiniAgentTestCriteria(
+        evaluation_criteria=AgentTestCriteria(
             task_type="file_ops",
             complexity="simple",
             expected_tools=["write_file", "read_file"],
@@ -39,7 +39,7 @@ async def test_simple_case():
     print(f"Expected tools: {test_case.evaluation_criteria.expected_tools}")
     
     # Run evaluation
-    result = await evaluator.evaluate_mini_agent_test(test_case)
+    result = await evaluator.evaluate_agent_test(test_case)
     
     print("\n📊 Results:")
     print(f"Tools detected: {result.tools_used}")

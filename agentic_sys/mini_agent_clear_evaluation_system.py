@@ -1,31 +1,29 @@
 #!/usr/bin/env python3
 """
-Mini-Agent Comprehensive Evaluation System with CLEAR Framework
-==============================================================
-Implements Multi-Dimensional CLEAR Framework specifically for Mini-Agent systems evaluation.
+Agent Comprehensive Evaluation System with CLEAR Framework
+=========================================================
+Implements Multi-Dimensional CLEAR Framework for pluggable agent runtimes.
 
-This system evaluates agent-specific capabilities:
+This system evaluates agent capabilities:
 1. Multi-step task execution and reasoning
-2. Tool selection and usage effectiveness  
+2. Tool selection and usage effectiveness
 3. Skills system integration
-4. Agent conversation and context management
+4. Conversation and context management
 5. Error handling and recovery
 
-CLEAR Framework Dimensions for Mini-Agent:
-- Cost (C): LLM API calls, token usage, computational overhead
+CLEAR Framework dimensions:
+- Cost (C): API calls, token usage, computational overhead
 - Latency (L): Task completion time, tool execution delays, response speed
 - Efficiency (E): Steps needed, tool selection accuracy, context utilization
-- Assurance (A): Task completion accuracy, output quality, reasoning correctness  
+- Assurance (A): Task completion accuracy, output quality, reasoning correctness
 - Reliability (R): Success rates, error handling, system stability
-
-Uses proper mini-agent CLI interface with --task parameter for realistic testing.
 """
 
 import asyncio
+import argparse
 import json
 import time
 import traceback
-import subprocess
 import tempfile
 import re
 from pathlib import Path
@@ -48,12 +46,17 @@ from advanced_evaluation_system import (
     EvaluationCriteria,
     EvaluationResult
 )
+from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
+from agent_runtime.factory import create_agent_adapter
+from agent_runtime.models import AgentExecutionRequest
+from agent_runtime.script_config import resolve_script_runtime_options
 
 logger = logging.getLogger(__name__)
 
 
-def _looks_like_mini_agent_process(process_name: str, cmd_parts: List[str]) -> bool:
-    """Best-effort matcher for mini-agent processes across launcher variants."""
+def _looks_like_agent_process(process_name: str, cmd_parts: List[str], process_hint: str) -> bool:
+    """Best-effort matcher for arbitrary agent runtimes based on adapter hint."""
+    hint = Path((process_hint or "").strip()).name.lower().replace("_", "-")
     normalized_name = Path(process_name or "").name.lower().replace("_", "-")
     normalized_parts = [
         Path(part).name.lower().replace("_", "-")
@@ -61,23 +64,26 @@ def _looks_like_mini_agent_process(process_name: str, cmd_parts: List[str]) -> b
         if part
     ]
 
-    if "mini-agent" in normalized_name:
-        return True
-
-    if any(part in {"mini-agent", "mini-agent.exe"} for part in normalized_parts):
-        return True
+    if hint:
+        if len(hint) <= 3:
+            if normalized_name == hint or hint in normalized_parts:
+                return True
+        else:
+            if hint == normalized_name or hint in normalized_name or hint in normalized_parts:
+                return True
 
     lowered_cmd = [(part or "").lower() for part in (cmd_parts or [])]
-    for idx, token in enumerate(lowered_cmd[:-1]):
-        if token == "-m" and lowered_cmd[idx + 1].replace("_", "-") == "mini-agent":
-            return True
+    if hint == "mini-agent":
+        for idx, token in enumerate(lowered_cmd[:-1]):
+            if token == "-m" and lowered_cmd[idx + 1].replace("_", "-") == "mini-agent":
+                return True
 
-    return "mini-agent" in " ".join(lowered_cmd).replace("_", "-")
+    return False
 
 
 @dataclass
-class MiniAgentCLEARMetrics:
-    """CLEAR Framework metrics specifically for Mini-Agent evaluation"""
+class AgentCLEARMetrics:
+    """CLEAR Framework metrics for agent evaluation."""
     
     # Cost Dimension - API and computational costs
     llm_api_calls: int = 0
@@ -85,6 +91,7 @@ class MiniAgentCLEARMetrics:
     tool_executions: int = 0
     skill_activations: int = 0
     estimated_cost_usd: float = 0.0
+    cost_is_estimated: bool = True
     context_window_usage: float = 0.0  # Percentage of context used
     
     # Latency Dimension - Time-based performance
@@ -93,6 +100,9 @@ class MiniAgentCLEARMetrics:
     tool_execution_time: float = 0.0
     llm_response_time: float = 0.0
     steps_to_completion: int = 0
+    supports_structured_trace: bool = True
+    trace_signal_quality: float = 1.0
+    time_breakdown_is_estimated: bool = False
     
     # Efficiency Dimension - Resource utilization and optimization
     task_efficiency_score: float = 0.0  # Task completion optimality
@@ -113,11 +123,12 @@ class MiniAgentCLEARMetrics:
     execution_success_rate: float = 0.0
     error_recovery_effectiveness: float = 0.0
     response_consistency: float = 0.0  # Consistency across similar tasks
+    response_consistency_measured: bool = False
     system_stability: float = 0.0
 
 @dataclass
-class MiniAgentTestCriteria:
-    """Test criteria specific to Mini-Agent evaluation"""
+class AgentTestCriteria:
+    """Test criteria for agent evaluation."""
     
     # Task characteristics
     task_type: str = "general"  # "coding", "analysis", "file_ops", "reasoning", "skills"
@@ -140,14 +151,14 @@ class MiniAgentTestCriteria:
     max_acceptable_steps: int = 15
 
 @dataclass
-class MiniAgentTestCase:
-    """Test case definition for Mini-Agent evaluation"""
+class AgentTestCase:
+    """Test case definition for agent evaluation."""
     
     name: str
     category: str  # "coding", "analysis", "file_operations", "reasoning", "skills_usage"
     description: str
     task_prompt: str
-    evaluation_criteria: MiniAgentTestCriteria = field(default_factory=MiniAgentTestCriteria)
+    evaluation_criteria: AgentTestCriteria = field(default_factory=AgentTestCriteria)
     
     # Expected outcomes
     expected_outputs: List[str] = field(default_factory=list)
@@ -158,14 +169,14 @@ class MiniAgentTestCase:
     ground_truth_answer: Optional[str] = None
 
 @dataclass
-class MiniAgentEvaluationResult:
-    """Comprehensive evaluation result for Mini-Agent"""
+class AgentEvaluationResult:
+    """Comprehensive evaluation result for agent evaluation."""
     
-    test_case: MiniAgentTestCase
-    clear_metrics: MiniAgentCLEARMetrics
+    test_case: AgentTestCase
+    clear_metrics: AgentCLEARMetrics
     evaluation_result: EvaluationResult
     
-    # Mini-Agent specific results
+    # Runtime execution outputs
     agent_output: str = ""
     agent_error_output: str = ""
     execution_logs: str = ""
@@ -201,8 +212,8 @@ class StepResourceProfile:
     memory_mb: float
 
 
-class MiniAgentResourceMonitor:
-    """Resource monitoring specifically for Mini-Agent execution"""
+class AgentResourceMonitor:
+    """Resource monitoring for agent execution."""
     
     def __init__(self):
         self.monitoring = False
@@ -211,6 +222,7 @@ class MiniAgentResourceMonitor:
         self.cpu_samples = []
         self.mini_agent_process = None
         self.target_pid: Optional[int] = None
+        self.process_name_hint: str = "mini-agent"
         self.monitor_thread = None
         # Timestamped snapshots: List of (abs_timestamp, memory_mb, cpu_pct)
         self.snapshots: List[Tuple[float, float, float]] = []
@@ -227,8 +239,8 @@ class MiniAgentResourceMonitor:
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             self.mini_agent_process = None
         
-    def start_monitoring(self):
-        """Start monitoring mini-agent process resources"""
+    def start_monitoring(self, process_name_hint: str = "mini-agent"):
+        """Start monitoring agent process resources"""
         self.monitoring = True
         self.start_time = time.time()
         self.peak_memory = 0.0
@@ -236,6 +248,7 @@ class MiniAgentResourceMonitor:
         self.snapshots = []
         self.mini_agent_process = None
         self.target_pid = None
+        self.process_name_hint = process_name_hint or "mini-agent"
         
         def monitor_loop():
             while self.monitoring:
@@ -259,7 +272,7 @@ class MiniAgentResourceMonitor:
                                 try:
                                     name = (proc.info.get('name') or '').lower()
                                     cmd_parts = proc.info.get('cmdline') or []
-                                    if _looks_like_mini_agent_process(name, cmd_parts):
+                                    if _looks_like_agent_process(name, cmd_parts, self.process_name_hint):
                                         self.mini_agent_process = psutil.Process(proc.info['pid'])
                                         self.mini_agent_process.cpu_percent(interval=None)
                                         break
@@ -302,50 +315,66 @@ class MiniAgentResourceMonitor:
         closest = min(self.snapshots, key=lambda s: abs(s[0] - abs_timestamp))
         return (closest[1], closest[2])
 
-class MiniAgentLogAnalyzer:
-    """Enhanced Mini-Agent log analyzer with multiple detection methods and log file access"""
+class AgentLogAnalyzer:
+    """Runtime log analyzer with multiple detection methods and optional log-file access."""
     
-    def __init__(self):
+    def __init__(
+        self,
+        known_tools: Optional[List[str]] = None,
+        enforce_known_tools: bool = True,
+        runtime_profile: str = "mini-agent",
+    ):
+        profile = (runtime_profile or "").strip().lower().replace("_", "-")
+        self.runtime_profile = "mini-agent" if "mini-agent" in profile else "generic"
+
         # Multiple pattern approaches for robustness
         self.tool_call_patterns = [
             r"🔧 Tool Call: ([a-zA-Z_]+)",           # Primary pattern
             r"Tool Call: ([a-zA-Z_]+)",              # Alternative
-            r'"name":\s*"([a-zA-Z_]+)"',             # JSON format in logs
+            r'"name":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',             # JSON format in logs
+            r'"tool(?:_name|Name)":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',
             r"Tool:\s*([a-zA-Z_]+)",                 # Simpler format
         ]
         
-        self.step_pattern = r"Step (\d+)/\d+"
-        self.thinking_pattern = r"🧠 Thinking:"
-        self.assistant_pattern = r"🤖 Assistant:"
+        if self.runtime_profile == "mini-agent":
+            self.step_pattern = r"Step (\d+)/\d+"
+            self.thinking_pattern = r"🧠 Thinking:"
+            self.assistant_pattern = r"🤖 Assistant:"
+        else:
+            self.step_pattern = r"(?:\bStep\s+(\d+)\b|\"step\"\s*:\s*(\d+))"
+            self.thinking_pattern = r"^\s*(?:thinking|reasoning)\s*[:：]"
+            self.assistant_pattern = r"^\s*(?:assistant|final)\s*[:：]"
         self.error_pattern = r"❌|✗ Error"
         self.tool_result_pattern = r"(?:✓|✅)\s*Result"
         
         # Session statistics pattern (from end of log)
         self.session_stats_pattern = r"Total Messages:\s*(\d+).*Tool Calls:\s*(\d+).*API Tokens Used:\s*([\d,]+)"
         
-        # Real timing patterns from Mini-Agent logs
+        # Timing pattern used by runtimes that print session durations.
         self.session_duration_pattern = r"Session Duration: (\d{2}):(\d{2}):(\d{2})"
         
-        # Known mini-agent tools for verification
-        self.known_tools = [
-            "read_file", "write_file", "edit_file", 
+        # Known tools for stricter verification when runtime semantics are compatible.
+        self.known_tools = set(known_tools or [
+            "read_file", "write_file", "edit_file",
             "bash", "bash_output", "bash_kill",
             "record_note", "recall_notes", "get_skill"
-        ]
+        ])
+        self.enforce_known_tools = enforce_known_tools
     
     def analyze_execution_log(self, stdout_log: str, log_file_path: Optional[str] = None) -> Dict[str, Any]:
         """
         Enhanced log analysis with multiple detection methods and log file access
         
         Args:
-            stdout_log: The stdout from mini-agent execution
-            log_file_path: Optional path to the detailed log file in ~/.mini-agent/log/
+            stdout_log: The stdout from runtime execution.
+            log_file_path: Optional path to a runtime detailed log file.
         """
         
         analysis = {
             "total_steps": 0,
             "tools_used": [],
             "tool_call_count": 0,
+            "tool_call_count_source": "none",
             "thinking_blocks": 0,
             "assistant_responses": 0,
             "errors_encountered": 0,
@@ -356,7 +385,10 @@ class MiniAgentLogAnalyzer:
             "log_sources": ["stdout"],
             "session_duration": {},    # Session timing from logs
             "tool_timings": [],       # List of {tool_name, estimated_duration}
-            "detailed_timeline": []    # Chronological list of all events
+            "detailed_timeline": [],    # Chronological list of all events
+            "runtime_profile": self.runtime_profile,
+            "has_structured_trace": False,
+            "trace_signal_quality": 1.0,
         }
         
         # Analyze stdout log
@@ -380,10 +412,24 @@ class MiniAgentLogAnalyzer:
         
         # Remove duplicates and clean up
         analysis["tools_used"] = list(dict.fromkeys(analysis["tools_used"]))  # Remove duplicates, preserve order
-        analysis["tool_call_count"] = sum(
-            1 for event in analysis["detailed_timeline"]
-            if event.get("event_type") == "tool_call"
+        self._finalize_tool_call_count(analysis)
+        self._estimate_tool_timings(analysis)
+
+        analysis["has_structured_trace"] = (
+            analysis["total_steps"] > 0
+            or analysis["tool_call_count"] > 0
+            or len(analysis["detailed_timeline"]) > 0
         )
+        if self.runtime_profile != "mini-agent":
+            if analysis["has_structured_trace"]:
+                analysis["trace_signal_quality"] = 0.8
+            elif stdout_log.strip():
+                analysis["trace_signal_quality"] = 0.5
+                analysis["assistant_responses"] = max(1, analysis["assistant_responses"])
+            else:
+                analysis["trace_signal_quality"] = 0.2
+        else:
+            analysis["trace_signal_quality"] = 1.0 if analysis["has_structured_trace"] else 0.6
         
         return analysis
     
@@ -398,7 +444,8 @@ class MiniAgentLogAnalyzer:
             # Track steps
             step_match = re.search(self.step_pattern, line)
             if step_match:
-                step_num = int(step_match.group(1))
+                groups = [group for group in step_match.groups() if group]
+                step_num = int(groups[0]) if groups else 0
                 analysis["total_steps"] = max(analysis["total_steps"], step_num)
                 analysis["step_breakdown"].append({"step": step_num, "line": i, "text": line.strip()})
                 current_step = step_num
@@ -425,7 +472,7 @@ class MiniAgentLogAnalyzer:
                 tool_match = re.search(pattern, line)
                 if tool_match:
                     tool_name = tool_match.group(1)
-                    if tool_name in self.known_tools:
+                    if (not self.enforce_known_tools) or (tool_name in self.known_tools):
                         if tool_name not in analysis["tools_used"]:
                             analysis["tools_used"].append(tool_name)
                         if current_step and tool_name not in current_step_tools:
@@ -479,16 +526,19 @@ class MiniAgentLogAnalyzer:
                     })
         
         # Update total tool-call count before timing estimation.
-        analysis["tool_call_count"] = sum(
+        timeline_count = sum(
             1 for event in analysis["detailed_timeline"]
             if event.get("event_type") == "tool_call"
         )
+        analysis["tool_call_count"] = timeline_count
+        analysis["tool_call_count_source"] = "timeline" if timeline_count > 0 else "none"
 
         # Calculate tool-specific timing estimates
         self._estimate_tool_timings(analysis)
     
     def _estimate_tool_timings(self, analysis: Dict[str, Any]):
         """Estimate timing for each tool call based on available timing data"""
+        analysis["tool_timings"] = []
         
         # Use session duration to estimate tool timing
         session_duration = analysis.get("session_duration") or {}
@@ -509,6 +559,35 @@ class MiniAgentLogAnalyzer:
                     "estimated_duration": estimated_per_tool,
                     "total_session_duration": total_session_time
                 })
+
+    def _finalize_tool_call_count(self, analysis: Dict[str, Any]) -> None:
+        """Unify tool call count across timeline, session stats, and lower-bound inference."""
+        timeline_count = sum(
+            1 for event in analysis["detailed_timeline"]
+            if event.get("event_type") == "tool_call"
+        )
+        if timeline_count > 0:
+            analysis["tool_call_count"] = timeline_count
+            analysis["tool_call_count_source"] = "timeline"
+            return
+
+        session_tool_calls = 0
+        session_stats = analysis.get("session_stats") or {}
+        if isinstance(session_stats, dict):
+            session_tool_calls = int(session_stats.get("tool_calls") or 0)
+        if session_tool_calls > 0:
+            analysis["tool_call_count"] = session_tool_calls
+            analysis["tool_call_count_source"] = "session_stats"
+            return
+
+        inferred_from_tools = len(analysis.get("tools_used") or [])
+        if inferred_from_tools > 0:
+            analysis["tool_call_count"] = inferred_from_tools
+            analysis["tool_call_count_source"] = "tools_used_lower_bound"
+            return
+
+        analysis["tool_call_count"] = 0
+        analysis["tool_call_count_source"] = "none"
     
     def _analyze_detailed_log(self, log_text: str, analysis: Dict[str, Any]):
         """Analyze the detailed log file for additional information"""
@@ -518,7 +597,7 @@ class MiniAgentLogAnalyzer:
         json_matches = re.findall(json_tool_pattern, log_text)
         
         for tool_name in json_matches:
-            if tool_name in self.known_tools and tool_name not in analysis["tools_used"]:
+            if ((not self.enforce_known_tools) or (tool_name in self.known_tools)) and tool_name not in analysis["tools_used"]:
                 analysis["tools_used"].append(tool_name)
         
         # Look for function call patterns
@@ -526,7 +605,7 @@ class MiniAgentLogAnalyzer:
         function_matches = re.findall(function_pattern, log_text)
         
         for tool_name in function_matches:
-            if tool_name in self.known_tools and tool_name not in analysis["tools_used"]:
+            if ((not self.enforce_known_tools) or (tool_name in self.known_tools)) and tool_name not in analysis["tools_used"]:
                 analysis["tools_used"].append(tool_name)
     
     def _extract_log_file_path(self, stdout_log: str) -> Optional[str]:
@@ -570,83 +649,85 @@ class MiniAgentLogAnalyzer:
             except (ValueError, IndexError) as e:
                 logger.warning(f"Could not parse session statistics: {e}")
 
-class MiniAgentCLEAREvaluator:
+class AgentCLEAREvaluator:
     """
-    Comprehensive Mini-Agent evaluation system implementing CLEAR Framework
-    specifically designed for agent systems evaluation
+    Comprehensive agent evaluation system implementing CLEAR Framework.
     """
     
-    def __init__(self, results_dir: str = "mini_agent_evaluation_results", 
-                 mini_agent_path: Optional[str] = None):
+    def __init__(
+        self,
+        results_dir: str = "agent_evaluation_results",
+        runtime_path: Optional[str] = None,
+        agent_adapter: Optional[AgentAdapter] = None,
+    ):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
         
-        # Auto-detect mini-agent path
-        if mini_agent_path is None:
-            import sys, shutil
-            possible_paths = [
-                # Windows conda env (common Miniconda/Anaconda locations)
-                r"D:\Apps\Miniconda\envs\mini-agent\Scripts\mini-agent.exe",
-                r"C:\ProgramData\Miniconda3\envs\mini-agent\Scripts\mini-agent.exe",
-                r"C:\Users\Hanne\Miniconda3\envs\mini-agent\Scripts\mini-agent.exe",
-                # macOS / Linux venv (kept for cross-platform compat)
-                "/Users/ria/Downloads/UCSD/CSE291P/Team28/Mini-Agent/.venv/bin/mini-agent",
-                "./Mini-Agent/.venv/bin/mini-agent",
-            ]
-
-            found = None
-            # 1. Check explicit paths
-            for path in possible_paths:
-                if Path(path).exists():
-                    found = path
-                    break
-
-            # 2. Check PATH (works if conda env is activated)
-            if found is None:
-                found = shutil.which("mini-agent")
-
-            # 3. Try conda run as fallback (works without activating env)
-            if found is None:
-                try:
-                    test = subprocess.run(
-                        ["conda", "run", "-n", "mini-agent", "mini-agent", "--version"],
-                        capture_output=True, text=True
-                    )
-                    if test.returncode == 0:
-                        found = "__conda_run__"  # special sentinel
-                except FileNotFoundError:
-                    # conda is optional; we'll continue to the unified RuntimeError below.
-                    pass
-
-            if found is None:
-                raise RuntimeError(
-                    "Could not find mini-agent executable. "
-                    "Run: conda activate mini-agent  then re-run, "
-                    "or pass mini_agent_path= explicitly."
-                )
-
-            self.mini_agent_path = found
-            self._use_conda_run = (found == "__conda_run__")
+        if agent_adapter is not None:
+            self.agent_adapter = agent_adapter
+            self.runtime_path = runtime_path or getattr(
+                agent_adapter,
+                "executable",
+                getattr(agent_adapter, "agent_id", "custom-agent"),
+            )
         else:
-            self.mini_agent_path = mini_agent_path
-            self._use_conda_run = False
+            if runtime_path is not None:
+                self.agent_adapter = MiniAgentAdapter(executable=runtime_path)
+            else:
+                self.agent_adapter = MiniAgentAdapter.auto_detect()
+            self.runtime_path = getattr(self.agent_adapter, "executable", "mini-agent")
             
         # Initialize components
         self.advanced_evaluator = AdvancedEvaluator(use_llm_judge=False)
-        self.resource_monitor = MiniAgentResourceMonitor()
-        self.log_analyzer = MiniAgentLogAnalyzer()
+        self.resource_monitor = AgentResourceMonitor()
+        self._runtime_uses_mini_agent_semantics = self._is_mini_agent_runtime()
+        self.log_analyzer = AgentLogAnalyzer(
+            enforce_known_tools=self._runtime_uses_mini_agent_semantics,
+            runtime_profile=self._agent_label(),
+        )
         
         # Logging setup
         logging.basicConfig(level=logging.INFO)
-        logger.info(f"Mini-Agent path: {self.mini_agent_path}")
+        logger.info("Agent adapter: %s", getattr(self.agent_adapter, "agent_id", "custom-agent"))
+        logger.info("Agent runtime path: %s", self.runtime_path)
+
+    def _is_mini_agent_runtime(self) -> bool:
+        agent_id = (getattr(self.agent_adapter, "agent_id", "") or "").lower()
+        if "mini-agent" in agent_id:
+            return True
+        process_hint = (getattr(self.agent_adapter, "process_name_hint", "") or "").lower()
+        return "mini-agent" in process_hint
+
+    def _agent_label(self) -> str:
+        return getattr(self.agent_adapter, "agent_id", "agent") or "agent"
+
+    def _artifact_prefix(self) -> str:
+        return self._agent_label().replace("-", "_")
+
+    def _run_agent_with_pid_binding(self, request: AgentExecutionRequest):
+        """Prefer early PID binding via callback; fall back for legacy adapters."""
+        conda_mode = bool(getattr(self.agent_adapter, "conda_env", None))
+
+        def _on_process_start(pid: int):
+            self._bind_monitor_target_pid(pid, conda_mode=conda_mode)
+
+        try:
+            return self.agent_adapter.run(request, on_process_start=_on_process_start)
+        except TypeError as exc:
+            if "on_process_start" not in str(exc):
+                raise
+            execution = self.agent_adapter.run(request)
+            if execution.pid is not None:
+                self._bind_monitor_target_pid(execution.pid, conda_mode=conda_mode)
+            return execution
     
-    def create_mini_agent_test_suite(self) -> List[MiniAgentTestCase]:
-        """Create comprehensive test cases for Mini-Agent evaluation"""
+    def create_base_test_suite(self) -> List[AgentTestCase]:
+        """Create runtime-agnostic base test suite."""
         
         test_cases = []
         
         # 1. Simple File Operations
-        test_cases.append(MiniAgentTestCase(
+        test_cases.append(AgentTestCase(
             name="simple_file_operations",
             category="file_operations",
             description="Create, modify, and read files to test basic tool usage",
@@ -655,7 +736,7 @@ class MiniAgentCLEAREvaluator:
 2. Read the file back and calculate the sum of all numbers
 3. Create another file called 'result.txt' with the calculated sum
 4. Show me the contents of both files to confirm they were created correctly""",
-            evaluation_criteria=MiniAgentTestCriteria(
+            evaluation_criteria=AgentTestCriteria(
                 task_type="file_ops",
                 complexity="simple",
                 expected_tools=["write_file", "read_file"],
@@ -673,7 +754,7 @@ class MiniAgentCLEAREvaluator:
         ))
         
         # 2. Coding Task with Analysis
-        test_cases.append(MiniAgentTestCase(
+        test_cases.append(AgentTestCase(
             name="python_coding_task",
             category="coding",
             description="Write, execute, and debug a Python script",
@@ -685,7 +766,7 @@ class MiniAgentCLEAREvaluator:
 5. If there are any errors, fix them
 
 Please show me the complete process including testing.""",
-            evaluation_criteria=MiniAgentTestCriteria(
+            evaluation_criteria=AgentTestCriteria(
                 task_type="coding",
                 complexity="medium",
                 expected_tools=["write_file", "bash", "read_file"],
@@ -703,7 +784,7 @@ Please show me the complete process including testing.""",
         ))
         
         # 3. Multi-step Analysis Task
-        test_cases.append(MiniAgentTestCase(
+        test_cases.append(AgentTestCase(
             name="data_analysis_task",
             category="analysis",
             description="Analyze data and generate insights with multiple steps",
@@ -726,7 +807,7 @@ Please show me the complete process including testing.""",
    - Saves results to 'analysis_results.txt'
 
 3. Run the script and show me the analysis results""",
-            evaluation_criteria=MiniAgentTestCriteria(
+            evaluation_criteria=AgentTestCriteria(
                 task_type="analysis",
                 complexity="complex",
                 expected_tools=["write_file", "read_file", "bash"],
@@ -744,7 +825,7 @@ Please show me the complete process including testing.""",
         ))
         
         # 4. Error Handling and Recovery
-        test_cases.append(MiniAgentTestCase(
+        test_cases.append(AgentTestCase(
             name="error_handling_test",
             category="reasoning",
             description="Test agent's ability to handle errors and adapt",
@@ -756,7 +837,7 @@ Please show me the complete process including testing.""",
 4. Try to run a Python command that has a syntax error: 'python -c "print(hello world"'
 5. Fix the syntax error and run the corrected command
 6. Summarize what went wrong and how you fixed the issues""",
-            evaluation_criteria=MiniAgentTestCriteria(
+            evaluation_criteria=AgentTestCriteria(
                 task_type="reasoning",
                 complexity="medium",
                 expected_tools=["read_file", "write_file", "bash"],
@@ -773,18 +854,27 @@ Please show me the complete process including testing.""",
             ground_truth_answer="Should handle file not found error by creating the file, identify and fix the Python syntax error, and provide a clear summary of problems encountered and solutions applied."
         ))
         
-        # 5. Skills System Usage (if available)
-        test_cases.append(MiniAgentTestCase(
+        return test_cases
+
+    def create_runtime_extension_suite(self) -> List[AgentTestCase]:
+        """Create runtime-specific tests; keep base suite agent-agnostic."""
+        if not self._runtime_uses_mini_agent_semantics:
+            return []
+
+        test_cases: List[AgentTestCase] = []
+
+        # 5. Skills System Usage (mini-agent capability)
+        test_cases.append(AgentTestCase(
             name="skills_integration_test",
             category="skills_usage",
-            description="Test integration with Mini-Agent skills system",
+            description="Test integration with runtime skills/tooling capabilities",
             task_prompt="""Please help me test the skills system:
 
 1. Try to use the get_skill tool to get information about available document skills
 2. Use any document-related skill to create or process a document  
 3. If no document skills are available, create a simple text document and process it manually
 4. Provide a summary of what skills were used and how they performed""",
-            evaluation_criteria=MiniAgentTestCriteria(
+            evaluation_criteria=AgentTestCriteria(
                 task_type="skills",
                 complexity="medium",
                 expected_tools=["get_skill", "write_file", "read_file"],
@@ -800,12 +890,22 @@ Please show me the complete process including testing.""",
             success_indicators=["skills", "available", "used", "performed"],
             ground_truth_answer="Should list available skills, demonstrate skill usage (or fallback to manual processing), and provide clear summary of skills system interaction."
         ))
-        
+
         return test_cases
+
+    def create_agent_test_suite(self) -> List[AgentTestCase]:
+        """Create test suite normalized for the current runtime semantics."""
+        tests = self.create_base_test_suite() + self.create_runtime_extension_suite()
+        if not self._runtime_uses_mini_agent_semantics:
+            for test_case in tests:
+                # Keep task prompts and quality checks, but remove mini-agent-specific tool expectations.
+                test_case.evaluation_criteria.expected_tools = []
+                test_case.evaluation_criteria.expected_skills = []
+        return tests
     
-    async def execute_mini_agent_task(self, test_case: MiniAgentTestCase) -> Tuple[str, str, bool, float]:
+    async def execute_agent_task(self, test_case: AgentTestCase) -> Tuple[str, str, bool, float]:
         """
-        Execute Mini-Agent task using proper CLI interface
+        Execute one task against the configured runtime adapter.
         Returns: (stdout, stderr, success, execution_time)
         """
         
@@ -813,59 +913,23 @@ Please show me the complete process including testing.""",
         
         try:
             with tempfile.TemporaryDirectory() as temp_workspace:
-                process = None
-                
-                if getattr(self, "_use_conda_run", False):
-                    cmd = [
-                        "conda", "run", "-n", "mini-agent", "mini-agent",
-                        "--workspace", temp_workspace,
-                        "--task", test_case.task_prompt,
-                    ]
-                else:
-                    cmd = [
-                        self.mini_agent_path,
-                        "--workspace", temp_workspace,
-                        "--task", test_case.task_prompt,
-                    ]
-
-                logger.info(f"Executing: {' '.join(cmd[:4])} ...")
-
-                # Execute mini-agent with task.
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    cwd=temp_workspace,
+                request = AgentExecutionRequest(
+                    task_prompt=test_case.task_prompt,
+                    workspace=temp_workspace,
+                    timeout_seconds=test_case.evaluation_criteria.max_task_time_seconds,
                 )
-                self._bind_monitor_target_pid(process.pid, conda_mode=getattr(self, "_use_conda_run", False))
+                execution = self._run_agent_with_pid_binding(request)
+                logger.info(f"Executing: {' '.join(execution.command[:4])} ...")
 
-                try:
-                    stdout, stderr = process.communicate(
-                        timeout=test_case.evaluation_criteria.max_task_time_seconds
-                    )
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    stdout, stderr = process.communicate()
-                    execution_time = time.time() - start_time
-                    timeout_msg = (
-                        f"Task timed out after "
-                        f"{test_case.evaluation_criteria.max_task_time_seconds} seconds"
-                    )
-                    combined_stderr = f"{stderr}\n{timeout_msg}" if stderr else timeout_msg
-                    return stdout or "", combined_stderr, False, execution_time
-                
-                execution_time = time.time() - start_time
-                success = process.returncode == 0
+                stdout = execution.stdout or ""
+                stderr = execution.stderr or ""
+                success = execution.success
+                execution_time = execution.execution_time_seconds
                 
                 # Check for expected file changes in workspace
-                expected_files_found = []
                 for expected_file in test_case.expected_file_changes:
                     file_path = Path(temp_workspace) / expected_file
                     if file_path.exists():
-                        expected_files_found.append(expected_file)
                         # Read file content for analysis
                         try:
                             content = file_path.read_text()
@@ -884,8 +948,8 @@ Please show me the complete process including testing.""",
         """
         Bind resource monitor to the best target PID.
 
-        - direct mode: bind to launcher pid directly (mini-agent itself)
-        - conda mode: launcher is usually `conda`; try to find the spawned mini-agent child
+        - direct mode: bind to launcher pid directly (runtime executable itself)
+        - conda mode: launcher is usually `conda`; bind spawned runtime child if possible
         """
         if not PSUTIL_AVAILABLE:
             return
@@ -910,7 +974,11 @@ Please show me the complete process including testing.""",
                 try:
                     name = (child.name() or "").lower()
                     cmd_parts = child.cmdline() or []
-                    if _looks_like_mini_agent_process(name, cmd_parts):
+                    if _looks_like_agent_process(
+                        name,
+                        cmd_parts,
+                        getattr(self.agent_adapter, "process_name_hint", self._agent_label()),
+                    ):
                         self.resource_monitor.set_target_pid(child.pid)
                         return
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -918,26 +986,43 @@ Please show me the complete process including testing.""",
 
             time.sleep(0.1)
     
-    async def evaluate_mini_agent_test(self, test_case: MiniAgentTestCase) -> MiniAgentEvaluationResult:
+    async def evaluate_agent_test(self, test_case: AgentTestCase) -> AgentEvaluationResult:
         """
-        Comprehensive evaluation of Mini-Agent test case using CLEAR Framework
+        Comprehensive evaluation of one agent test case using CLEAR Framework.
         """
         
-        logger.info(f"Evaluating Mini-Agent test: {test_case.name}")
+        logger.info(f"Evaluating agent test: {test_case.name}")
         
         # Initialize metrics
-        clear_metrics = MiniAgentCLEARMetrics()
+        clear_metrics = AgentCLEARMetrics()
         
-        # Start resource monitoring
-        self.resource_monitor.start_monitoring()
-        
+        peak_memory = 0.0
+        avg_cpu = 0.0
+        monitor_started = False
+        monitor_stopped = False
+
+        def _stop_monitor_if_needed() -> None:
+            nonlocal peak_memory, avg_cpu, monitor_stopped
+            if not monitor_started or monitor_stopped:
+                return
+            try:
+                _, peak_memory, avg_cpu = self.resource_monitor.stop_monitoring()
+            finally:
+                monitor_stopped = True
+
         try:
-            # Execute Mini-Agent task — record wall-clock start for correlation later
+            # Start resource monitoring
+            self.resource_monitor.start_monitoring(
+                getattr(self.agent_adapter, "process_name_hint", self._agent_label())
+            )
+            monitor_started = True
+
+            # Execute task and record wall-clock start for correlation.
             task_start_time = time.time()
-            stdout, stderr, success, execution_time = await self.execute_mini_agent_task(test_case)
-            
-            # Stop resource monitoring
-            _, peak_memory, avg_cpu = self.resource_monitor.stop_monitoring()
+            try:
+                stdout, stderr, success, execution_time = await self.execute_agent_task(test_case)
+            finally:
+                _stop_monitor_if_needed()
             
             # Defensive: ensure stdout/stderr are always strings (guards against subprocess edge cases)
             stdout = stdout or ""
@@ -959,19 +1044,31 @@ Please show me the complete process including testing.""",
             if "session_stats" in log_analysis and "tokens_used" in log_analysis["session_stats"]:
                 clear_metrics.total_tokens_used = log_analysis["session_stats"]["tokens_used"]
                 clear_metrics.tool_executions = log_analysis["session_stats"]["tool_calls"]
+                clear_metrics.cost_is_estimated = False
             else:
                 clear_metrics.total_tokens_used = self._estimate_token_usage(test_case.task_prompt + stdout)
                 clear_metrics.tool_executions = log_analysis["tool_call_count"]
+                clear_metrics.cost_is_estimated = True
             
             clear_metrics.llm_api_calls = log_analysis["thinking_blocks"] + log_analysis["total_steps"]
+            if clear_metrics.llm_api_calls == 0 and (stdout.strip() or stderr.strip()):
+                # For runtimes without step/thinking markers, assume at least one model turn.
+                clear_metrics.llm_api_calls = max(1, log_analysis.get("assistant_responses", 0))
             clear_metrics.estimated_cost_usd = self._estimate_cost(clear_metrics.total_tokens_used, clear_metrics.llm_api_calls)
             
             # Latency Dimension
             clear_metrics.total_task_time = execution_time
             clear_metrics.steps_to_completion = log_analysis["total_steps"]
+            clear_metrics.supports_structured_trace = bool(
+                log_analysis.get("has_structured_trace")
+            )
+            clear_metrics.trace_signal_quality = float(log_analysis.get("trace_signal_quality", 1.0))
+            if (not clear_metrics.supports_structured_trace) and success:
+                clear_metrics.steps_to_completion = max(1, clear_metrics.steps_to_completion)
 
             # Compute time breakdown using timeline-weighted method (replaces hardcoded 70/30)
             time_breakdown = self._calculate_time_breakdown(log_analysis, execution_time)
+            clear_metrics.time_breakdown_is_estimated = bool(time_breakdown.get("is_estimated", False))
             clear_metrics.tool_execution_time = time_breakdown["tool_execution_s"]
             clear_metrics.llm_response_time = time_breakdown["llm_inference_s"]
             clear_metrics.agent_thinking_time = time_breakdown["llm_inference_s"]  # same concept
@@ -979,15 +1076,24 @@ Please show me the complete process including testing.""",
             # Efficiency Dimension
             clear_metrics.memory_usage_mb = peak_memory
             clear_metrics.cpu_usage_percent = avg_cpu
-            clear_metrics.steps_per_second = log_analysis["total_steps"] / max(execution_time, 0.1)
+            clear_metrics.steps_per_second = clear_metrics.steps_to_completion / max(execution_time, 0.1)
+            expected_tools = (
+                test_case.evaluation_criteria.expected_tools
+                if self._runtime_uses_mini_agent_semantics
+                else []
+            )
             clear_metrics.tool_selection_accuracy = self._calculate_tool_accuracy(
                 log_analysis["tools_used"], 
-                test_case.evaluation_criteria.expected_tools
+                expected_tools
             )
-            clear_metrics.task_efficiency_score = self._calculate_efficiency_score(
-                log_analysis["total_steps"], 
-                test_case.evaluation_criteria.max_acceptable_steps
-            )
+            if not clear_metrics.supports_structured_trace:
+                # Without structured trace, step-level efficiency is unknown; keep neutral.
+                clear_metrics.task_efficiency_score = 0.5
+            else:
+                clear_metrics.task_efficiency_score = self._calculate_efficiency_score(
+                    clear_metrics.steps_to_completion,
+                    test_case.evaluation_criteria.max_acceptable_steps
+                )
             
             # Assurance Dimension - Use advanced evaluator
             evaluation_criteria = EvaluationCriteria(
@@ -1018,31 +1124,31 @@ Please show me the complete process including testing.""",
                 log_analysis["successful_operations"]
             )
             clear_metrics.system_stability = 1.0 - (log_analysis["errors_encountered"] / max(log_analysis["total_steps"], 1))
-            clear_metrics.response_consistency = 0.8  # Placeholder - would need multiple runs
+            clear_metrics.response_consistency = 0.0
+            clear_metrics.response_consistency_measured = False
             
             # Calculate dimension scores
-            dimension_scores = self._calculate_mini_agent_dimension_scores(clear_metrics, test_case.evaluation_criteria)
+            dimension_scores = self._calculate_dimension_scores(clear_metrics, test_case.evaluation_criteria)
             
             # Calculate overall CLEAR score
             criteria = test_case.evaluation_criteria
-            overall_clear_score = (
-                dimension_scores['cost'] * criteria.cost_weight +
-                dimension_scores['latency'] * criteria.latency_weight +
-                dimension_scores['efficiency'] * criteria.efficiency_weight +
-                dimension_scores['assurance'] * criteria.assurance_weight +
-                dimension_scores['reliability'] * criteria.reliability_weight
+            active_weights = self._get_active_dimension_weights(clear_metrics, criteria)
+            overall_clear_score = sum(
+                dimension_scores[dimension] * weight
+                for dimension, weight in active_weights.items()
             )
             
             # Check threshold compliance
             passed_thresholds = (
+                clear_metrics.execution_success_rate == 1.0 and
                 clear_metrics.total_task_time <= criteria.max_task_time_seconds and
                 clear_metrics.task_completion_accuracy >= criteria.min_accuracy_threshold and
-                clear_metrics.estimated_cost_usd <= criteria.max_cost_per_task and
+                (clear_metrics.cost_is_estimated or clear_metrics.estimated_cost_usd <= criteria.max_cost_per_task) and
                 clear_metrics.steps_to_completion <= criteria.max_acceptable_steps
             )
             
             # Generate recommendations
-            recommendations = self._generate_mini_agent_recommendations(clear_metrics, test_case.evaluation_criteria)
+            recommendations = self._generate_recommendations(clear_metrics, test_case.evaluation_criteria)
             
             # Per-step resource attribution
             step_resource_profiles = self._build_step_resource_profiles(
@@ -1050,7 +1156,7 @@ Please show me the complete process including testing.""",
             )
 
             # Create result
-            result = MiniAgentEvaluationResult(
+            result = AgentEvaluationResult(
                 test_case=test_case,
                 clear_metrics=clear_metrics,
                 evaluation_result=evaluation_result,
@@ -1073,9 +1179,9 @@ Please show me the complete process including testing.""",
         except Exception as e:
             logger.error(f"Evaluation failed for {test_case.name}: {e}")
             # Return error result
-            return MiniAgentEvaluationResult(
+            return AgentEvaluationResult(
                 test_case=test_case,
-                clear_metrics=MiniAgentCLEARMetrics(),
+                clear_metrics=AgentCLEARMetrics(),
                 evaluation_result=EvaluationResult(overall_score=0.0),
                 agent_output="",
                 agent_error_output=f"Evaluation error: {str(e)}",
@@ -1086,7 +1192,9 @@ Please show me the complete process including testing.""",
                 dimension_scores={},
                 recommendations=["Fix evaluation system errors"]
             )
-    
+        finally:
+            _stop_monitor_if_needed()
+
     def _estimate_token_usage(self, text: str) -> int:
         """Estimate token usage from text (rough approximation)"""
         return int(len(text.split()) * 1.3)  # ~1.3 tokens per word
@@ -1131,15 +1239,18 @@ Please show me the complete process including testing.""",
             return 1.0
         return min(1.0, successes / total_ops)
     
-    def _calculate_mini_agent_dimension_scores(self, metrics: MiniAgentCLEARMetrics, 
-                                             criteria: MiniAgentTestCriteria) -> Dict[str, float]:
-        """Calculate normalized CLEAR dimension scores for Mini-Agent"""
+    def _calculate_dimension_scores(self, metrics: AgentCLEARMetrics, 
+                                             criteria: AgentTestCriteria) -> Dict[str, float]:
+        """Calculate normalized CLEAR dimension scores."""
         
         scores = {}
         
         # Cost Score
-        cost_ratio = metrics.estimated_cost_usd / criteria.max_cost_per_task
-        scores['cost'] = max(0.0, 1.0 - cost_ratio)
+        if metrics.cost_is_estimated:
+            scores['cost'] = 1.0
+        else:
+            cost_ratio = metrics.estimated_cost_usd / criteria.max_cost_per_task
+            scores['cost'] = max(0.0, 1.0 - cost_ratio)
         
         # Latency Score  
         time_ratio = metrics.total_task_time / criteria.max_task_time_seconds
@@ -1149,9 +1260,10 @@ Please show me the complete process including testing.""",
         efficiency_components = [
             metrics.task_efficiency_score,
             metrics.tool_selection_accuracy,
-            min(1.0, metrics.steps_per_second * 10),  # Normalize steps per second
-            max(0.0, 1.0 - metrics.memory_usage_mb / 1000)  # Penalize high memory
+            max(0.0, 1.0 - metrics.memory_usage_mb / 1000),  # Penalize high memory
         ]
+        if metrics.supports_structured_trace:
+            efficiency_components.append(min(1.0, metrics.steps_per_second * 10))  # Normalize steps per second
         scores['efficiency'] = sum(efficiency_components) / len(efficiency_components)
         
         # Assurance Score
@@ -1168,20 +1280,39 @@ Please show me the complete process including testing.""",
             metrics.execution_success_rate,
             metrics.error_recovery_effectiveness,
             metrics.system_stability,
-            metrics.response_consistency
         ]
+        if metrics.response_consistency_measured:
+            reliability_components.append(metrics.response_consistency)
         scores['reliability'] = sum(reliability_components) / len(reliability_components)
         
         return scores
+
+    def _get_active_dimension_weights(
+        self,
+        metrics: AgentCLEARMetrics,
+        criteria: AgentTestCriteria,
+    ) -> Dict[str, float]:
+        """Re-normalize weights over dimensions that are measured with adequate confidence."""
+        weights = {
+            "cost": criteria.cost_weight,
+            "latency": criteria.latency_weight,
+            "efficiency": criteria.efficiency_weight,
+            "assurance": criteria.assurance_weight,
+            "reliability": criteria.reliability_weight,
+        }
+        if metrics.cost_is_estimated:
+            weights["cost"] = 0.0
+        total = sum(weights.values()) or 1.0
+        return {dimension: value / total for dimension, value in weights.items()}
     
-    def _generate_mini_agent_recommendations(self, metrics: MiniAgentCLEARMetrics, 
-                                           criteria: MiniAgentTestCriteria) -> List[str]:
-        """Generate specific recommendations for Mini-Agent optimization"""
+    def _generate_recommendations(self, metrics: AgentCLEARMetrics, 
+                                           criteria: AgentTestCriteria) -> List[str]:
+        """Generate optimization recommendations from CLEAR metrics."""
         
         recommendations = []
         
         # Cost recommendations
-        if metrics.estimated_cost_usd > criteria.max_cost_per_task * 0.8:
+        if (not metrics.cost_is_estimated) and metrics.estimated_cost_usd > criteria.max_cost_per_task * 0.8:
             recommendations.append(f"💰 Optimize token usage - cost ${metrics.estimated_cost_usd:.3f} approaching limit ${criteria.max_cost_per_task:.3f}")
         
         # Latency recommendations
@@ -1195,7 +1326,7 @@ Please show me the complete process including testing.""",
         if metrics.tool_selection_accuracy < 0.7:
             recommendations.append(f"🔧 Improve tool selection - accuracy {metrics.tool_selection_accuracy:.2f}")
         
-        if metrics.task_efficiency_score < 0.6:
+        if metrics.supports_structured_trace and metrics.task_efficiency_score < 0.6:
             recommendations.append("📈 Optimize task execution - too many unnecessary steps")
         
         # Assurance recommendations
@@ -1211,6 +1342,12 @@ Please show me the complete process including testing.""",
         
         if metrics.error_recovery_effectiveness < 0.7:
             recommendations.append("🔄 Improve error recovery - better adaptation to failures")
+
+        if metrics.cost_is_estimated:
+            recommendations.append("💲 Cost is estimated (not provider-reported) and excluded from strict scoring")
+
+        if not metrics.supports_structured_trace:
+            recommendations.append("🧾 Limited runtime trace - step-level efficiency metrics are approximated")
         
         if not recommendations:
             recommendations.append("✨ Excellent performance across all dimensions!")
@@ -1237,17 +1374,27 @@ Please show me the complete process including testing.""",
         TOOL_TYPES = {"tool_call", "tool_result"}
 
         if not timeline:
-            llm_s = round(execution_time * 0.70, 2)
-            tool_s = round(execution_time * 0.20, 2)
-            coord_s = round(execution_time * 0.10, 2)
+            if not log_analysis.get("has_structured_trace", False):
+                llm_s = round(execution_time, 2)
+                tool_s = 0.0
+                coord_s = 0.0
+                method = "coarse_no_structured_trace"
+                llm_pct, tool_pct, coord_pct = (100.0, 0.0, 0.0) if execution_time else (0.0, 0.0, 0.0)
+            else:
+                llm_s = round(execution_time * 0.70, 2)
+                tool_s = round(execution_time * 0.20, 2)
+                coord_s = round(execution_time * 0.10, 2)
+                method = "fixed_estimate (no timeline)"
+                llm_pct, tool_pct, coord_pct = 70.0, 20.0, 10.0
             return {
                 "llm_inference_s": llm_s,
                 "tool_execution_s": tool_s,
                 "coordination_s": coord_s,
-                "llm_inference_pct": 70.0,
-                "tool_execution_pct": 20.0,
-                "coordination_pct": 10.0,
-                "method": "fixed_estimate (no timeline)",
+                "llm_inference_pct": llm_pct,
+                "tool_execution_pct": tool_pct,
+                "coordination_pct": coord_pct,
+                "method": method,
+                "is_estimated": True,
             }
 
         llm_w = sum(3 for e in timeline if e["event_type"] in LLM_TYPES)
@@ -1269,6 +1416,7 @@ Please show me the complete process including testing.""",
             "tool_execution_pct": round(100 * tool_s / execution_time, 1) if execution_time else 0.0,
             "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
             "method": "timeline_weighted",
+            "is_estimated": True,
             "llm_events": sum(1 for e in timeline if e["event_type"] in LLM_TYPES),
             "tool_events": sum(1 for e in timeline if e["event_type"] in TOOL_TYPES),
             "coord_events": sum(1 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES),
@@ -1279,7 +1427,7 @@ Please show me the complete process including testing.""",
         log_analysis: Dict[str, Any],
         task_start_time: float,
         execution_time: float,
-        resource_monitor: "MiniAgentResourceMonitor",
+        resource_monitor: "AgentResourceMonitor",
     ) -> List[Dict[str, Any]]:
         """
         Correlate each timeline event with the closest resource snapshot.
@@ -1313,24 +1461,27 @@ Please show me the complete process including testing.""",
 
         return profiles
 
-    async def run_comprehensive_mini_agent_evaluation(self) -> List[MiniAgentEvaluationResult]:
-        """Run comprehensive Mini-Agent evaluation with CLEAR Framework"""
+    async def run_comprehensive_evaluation(self) -> List[AgentEvaluationResult]:
+        """Run comprehensive agent evaluation with CLEAR Framework."""
         
-        print("🤖 Mini-Agent Comprehensive Evaluation with CLEAR Framework")
+        print(f"🤖 Agent Comprehensive Evaluation with CLEAR Framework ({self._agent_label()})")
         print("=" * 80)
         print("Evaluating agent system across 5 key dimensions:")
         print("💰 Cost | ⚡ Latency | 📈 Efficiency | ✅ Assurance | 🛠️ Reliability")
         print("=" * 80)
         
-        test_cases = self.create_mini_agent_test_suite()
+        test_cases = self.create_agent_test_suite()
         results = []
         
         for i, test_case in enumerate(test_cases, 1):
             print(f"\n[{i}/{len(test_cases)}] Testing: {test_case.name} ({test_case.category})")
             print(f"📋 {test_case.description}")
-            print(f"🎯 Expected tools: {test_case.evaluation_criteria.expected_tools}")
+            if test_case.evaluation_criteria.expected_tools:
+                print(f"🎯 Expected tools: {test_case.evaluation_criteria.expected_tools}")
+            else:
+                print("🎯 Expected tools: (runtime-agnostic mode)")
             
-            result = await self.evaluate_mini_agent_test(test_case)
+            result = await self.evaluate_agent_test(test_case)
             results.append(result)
             
             # Print immediate summary
@@ -1339,18 +1490,18 @@ Please show me the complete process including testing.""",
             print(f"   💰 ${result.clear_metrics.estimated_cost_usd:.3f} | ⚡ {result.clear_metrics.total_task_time:.1f}s | 🔧 {len(result.tools_used)} tools | 🔄 {result.clear_metrics.steps_to_completion} steps")
             
             # Save result
-            await self._save_mini_agent_result(result)
+            await self._save_result(result)
         
         # Generate comprehensive report
-        await self._generate_mini_agent_report(results)
+        await self._generate_report(results)
         
         return results
-    
-    async def _save_mini_agent_result(self, result: MiniAgentEvaluationResult):
-        """Save detailed Mini-Agent evaluation result"""
+
+    async def _save_result(self, result: AgentEvaluationResult):
+        """Save detailed agent evaluation result."""
         
         timestamp = int(time.time())
-        filename = f"mini_agent_{result.test_case.name}_{timestamp}.json"
+        filename = f"{self._artifact_prefix()}_{result.test_case.name}_{timestamp}.json"
         filepath = self.results_dir / filename
         
         result_dict = {
@@ -1385,12 +1536,12 @@ Please show me the complete process including testing.""",
             json.dump(result_dict, f, indent=2)
         
         print(f"   📁 Result saved: {filename}")
-    
-    async def _generate_mini_agent_report(self, results: List[MiniAgentEvaluationResult]):
-        """Generate comprehensive Mini-Agent evaluation report"""
+
+    async def _generate_report(self, results: List[AgentEvaluationResult]):
+        """Generate comprehensive agent evaluation report."""
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        report_path = self.results_dir / f"mini_agent_clear_report_{timestamp}.md"
+        report_path = self.results_dir / f"{self._artifact_prefix()}_clear_report_{timestamp}.md"
         
         # Calculate statistics
         total_tests = len(results)
@@ -1410,13 +1561,13 @@ Please show me the complete process including testing.""",
         avg_coord_pct = round(100 * avg_coord_s / avg_time, 1) if avg_time else 0
         
         # Generate comprehensive report
-        report = f"""# Mini-Agent CLEAR Framework Evaluation Report
+        report = f"""# Agent CLEAR Framework Evaluation Report
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
 ## Executive Summary
 
-This report presents comprehensive evaluation results for the Mini-Agent system using the Multi-Dimensional CLEAR Framework, specifically adapted for agent-based systems.
+This report presents comprehensive evaluation results for the `{self._agent_label()}` runtime using the Multi-Dimensional CLEAR Framework.
 
 ### 🎯 Overall Performance
 
@@ -1611,38 +1762,108 @@ position in the log against wall-clock timestamps captured by the resource monit
 
 ---
 
-*Report generated by Mini-Agent CLEAR Framework Evaluation System*
-*Evaluation Path: {self.mini_agent_path}*
+*Report generated by Agent CLEAR Framework Evaluation System*
+*Evaluation Path: {self.runtime_path}*
 """
         
         with open(report_path, 'w') as f:
             f.write(report)
         
-        print(f"\n📊 Mini-Agent evaluation complete!")
+        print(f"\n📊 Agent evaluation complete!")
         print(f"📄 Report: {report_path}")
         print(f"📁 Results: {self.results_dir}")
         
         # Console summary
         print("\n" + "=" * 80)
-        print("MINI-AGENT CLEAR EVALUATION SUMMARY")
+        print("AGENT CLEAR EVALUATION SUMMARY")
         print("=" * 80)
         print(f"Success Rate: {passed_tests}/{total_tests} ({passed_tests/total_tests*100:.1f}%)")
         print(f"CLEAR Score: {avg_clear_score:.3f}/1.000")
         print(f"Avg Cost: ${avg_cost:.3f} | Avg Time: {avg_time:.1f}s | Avg Steps: {avg_steps:.1f}")
         print("=" * 80)
 
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Run phase3 CLEAR evaluation.")
+    parser.add_argument(
+        "--agent",
+        default="mini-agent",
+        help="Runtime adapter key/alias.",
+    )
+    parser.add_argument(
+        "--results-dir",
+        default=None,
+        help="Directory where phase3 outputs are written.",
+    )
+    parser.add_argument(
+        "--agent-config",
+        default=None,
+        help="Optional path to agent config YAML (defaults to config/config.yaml).",
+    )
+    parser.add_argument(
+        "--adapter-option",
+        action="append",
+        default=None,
+        help="Repeatable adapter override in KEY=VALUE form (parsed as YAML scalars/lists).",
+    )
+    parser.add_argument(
+        "--continue-agent-name",
+        default=None,
+        help="Continue agent name for `cn --agent <name>`.",
+    )
+    parser.add_argument(
+        "--continue-config",
+        default=None,
+        help="Continue config path or hub slug for `cn --config`.",
+    )
+    parser.add_argument(
+        "--continue-model",
+        action="append",
+        default=None,
+        help="Repeatable Continue model slug for `cn --model`.",
+    )
+    parser.add_argument(
+        "--continue-allow",
+        action="append",
+        default=None,
+        help="Repeatable Continue allow policy, e.g. --continue-allow edit.",
+    )
+    parser.add_argument(
+        "--continue-extra-arg",
+        action="append",
+        default=None,
+        help="Repeatable raw arg appended to Continue CLI command.",
+    )
+    return parser
+
+
 # Example usage
-async def main():
+async def main(argv: Optional[List[str]] = None):
     """Main execution function"""
+    args = _build_arg_parser().parse_args(argv)
+    results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
+        args=args,
+        script_name="phase3",
+        default_results_dir="agent_evaluation_results",
+    )
+    adapter = create_agent_adapter(
+        agent=args.agent,
+        **adapter_kwargs,
+    )
+
+    print("🚀 Starting CLEAR Framework Evaluation")
+    print("🎯 Focus: agent capabilities with pluggable runtime integration")
+    print(f"Using adapter: {adapter.agent_id}")
+    if config_source:
+        print(f"Using config: {config_source}")
     
-    print("🚀 Starting Mini-Agent CLEAR Framework Evaluation")
-    print("🎯 Focus: Agent-specific capabilities with proper --task integration")
-    
-    evaluator = MiniAgentCLEAREvaluator()
-    results = await evaluator.run_comprehensive_mini_agent_evaluation()
+    evaluator = AgentCLEAREvaluator(
+        results_dir=results_dir,
+        agent_adapter=adapter,
+    )
+    results = await evaluator.run_comprehensive_evaluation()
     
     print(f"\n✅ Evaluation Complete! Tested {len(results)} scenarios")
-    print("📈 Mini-Agent system assessed across all CLEAR dimensions")
+    print("📈 Agent system assessed across all CLEAR dimensions")
 
 if __name__ == "__main__":
     asyncio.run(main())

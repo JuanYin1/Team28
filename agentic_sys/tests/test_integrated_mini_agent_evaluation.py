@@ -4,17 +4,18 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from agent_runtime.models import AgentExecutionResult
 from advanced_evaluation_system import EvaluationCriteria, EvaluationResult
 from integrated_mini_agent_evaluation import (
     ComprehensiveTestResult,
-    IntegratedMiniAgentEvaluator,
+    IntegratedAgentEvaluator,
     TestCaseDefinition,
 )
 
@@ -22,7 +23,7 @@ from integrated_mini_agent_evaluation import (
 class IntegratedOutputContractTests(unittest.TestCase):
     def test_saved_output_preview_is_sanitized_and_truncated(self):
         with tempfile.TemporaryDirectory() as tmp:
-            evaluator = IntegratedMiniAgentEvaluator(results_dir=tmp)
+            evaluator = IntegratedAgentEvaluator(results_dir=tmp)
             long_output = "\x1b[32mSUCCESS\x1b[0m " + ("x" * 800)
 
             result = ComprehensiveTestResult(
@@ -36,8 +37,8 @@ class IntegratedOutputContractTests(unittest.TestCase):
                     max_time_seconds=30,
                 ),
                 total_execution_time=1.0,
-                mini_agent_output=long_output,
-                mini_agent_error=None,
+                agent_output=long_output,
+                agent_error=None,
                 execution_success=True,
                 evaluation_result=EvaluationResult(
                     overall_score=0.8,
@@ -61,21 +62,25 @@ class IntegratedOutputContractTests(unittest.TestCase):
             payload = json.loads(files[0].read_text())
 
         preview = payload["execution"]["output_preview"]
-        self.assertEqual(payload["schema_version"], "phase1.v2")
+        self.assertEqual(payload["schema_version"], "phase1.v3")
         self.assertNotIn("\x1b[", preview)
         self.assertLessEqual(len(preview), 503)
 
-    def test_subprocess_uses_utf8_replace_decoding(self):
+    def test_run_single_test_builds_expected_adapter_request(self):
         with tempfile.TemporaryDirectory() as tmp:
-            evaluator = IntegratedMiniAgentEvaluator(results_dir=tmp)
+            evaluator = IntegratedAgentEvaluator(results_dir=tmp)
             case = evaluator.create_comprehensive_test_suite()[0]
+            execution = AgentExecutionResult(
+                command=["mini-agent", "--workspace", "/tmp/ws", "--task", case.task_prompt],
+                stdout="ok",
+                stderr="",
+                success=True,
+                execution_time_seconds=1.23,
+                return_code=0,
+                pid=42,
+            )
 
-            process = MagicMock()
-            process.stdout = "ok"
-            process.stderr = ""
-            process.returncode = 0
-
-            with patch("integrated_mini_agent_evaluation.subprocess.run", return_value=process) as run_mock, \
+            with patch.object(evaluator.agent_adapter, "run", return_value=execution) as run_mock, \
                  patch.object(evaluator.evaluator, "evaluate_response") as eval_mock:
                 eval_mock.return_value = EvaluationResult(
                     overall_score=0.8,
@@ -91,9 +96,9 @@ class IntegratedOutputContractTests(unittest.TestCase):
                 )
                 asyncio.run(evaluator.run_single_integrated_test(case))
 
-            kwargs = run_mock.call_args.kwargs
-            self.assertEqual(kwargs["encoding"], "utf-8")
-            self.assertEqual(kwargs["errors"], "replace")
+            request = run_mock.call_args.args[0]
+            self.assertEqual(request.task_prompt, case.task_prompt)
+            self.assertEqual(request.timeout_seconds, case.max_time_seconds)
 
 
 if __name__ == "__main__":
