@@ -34,9 +34,13 @@ agents:
       executable:
       agent_name:
       config_path: continuedev/default-cli-config
-      model_slugs: []
+      model_slugs:
+        - anthropic/claude-haiku-4-5
       allow_policies: []
-      extra_args: []
+      extra_args:
+        - --org
+        - zhiruis-workspace-2
+        - --auto
 
   # Example: add a new agent with YAML only (no adapter/registry code changes).
   example-generic:

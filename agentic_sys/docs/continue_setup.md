@@ -1,57 +1,65 @@
-# Continue CLI Setup and Team Repro Guide
+# Continue CLI Setup and Repro Runbook
 
-This guide explains how to install Continue CLI (`cn`), verify it end to end, and run phase1/2/3 evaluation scripts with the `continue` agent profile.
+This runbook is for teammates who need to set up `cn` and run all evaluation phases with `--agent continue`.
 
-All commands below assume you are inside `agentic_sys/` unless explicitly stated.
+Default workspace for this repo: `zhiruis-workspace-2` (configured in `config/config.yaml`).
 
-## 1. Prerequisites
+## Quick Start (5 Minutes)
 
-- Node.js and npm are installed.
-- Python environment for this repo is ready.
-- Internet access is available for Continue login/model calls.
-
-## 2. Install Continue CLI
+From `agentic_sys/`:
 
 ```bash
 npm i -g @continuedev/cli
+which cn
+cn --version
+cn login
+cn -p "Reply with exactly OK and nothing else." --auto
+python verify_continue_setup.py --extra-arg=--auto
+python run_single_test.py --agent continue
 ```
 
-Verify:
+If all commands above succeed (or healthcheck returns `account_credits_exhausted`), your wiring is correct.
+If you use repo defaults, commands run against workspace `zhiruis-workspace-2`.
+
+## Step 1: Preconditions
+
+- Node.js + npm installed.
+- Python environment for this repo is available.
+- Internet access is available (login + model request).
+
+## Step 2: Install CLI
 
 ```bash
+npm i -g @continuedev/cli
 which cn
 cn --version
 ```
 
-If `cn` is not found, add your user bin to `PATH` and reopen shell:
+If `cn` is not found:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## 3. Authenticate Continue
+Then reopen shell and re-run `which cn`.
 
-Recommended:
+## Step 3: Login
 
 ```bash
 cn login
 ```
 
-Complete the browser device-code flow.
+Complete the browser flow.
 
-Notes:
-- If your team will use Continue credits later, login still needs to succeed now.
-- If you use your own provider config, you can skip credits but still need valid model/provider credentials.
+## Step 4: Verify End-to-End Request Path
 
-## 4. Quick Health Check (Real Request)
-
-Run a direct probe first:
+### 4.1 Direct probe
 
 ```bash
 cn -p "Reply with exactly OK and nothing else." --auto
 ```
 
-Then run project health check:
+### 4.2 Project healthcheck
 
 ```bash
 python verify_continue_setup.py --extra-arg=--auto
@@ -63,15 +71,15 @@ Optional JSON output:
 python verify_continue_setup.py --extra-arg=--auto --json
 ```
 
-Expected:
-- `Success: True` and non-empty `stdout`, or
-- `Diagnosis: account_credits_exhausted` if account is valid but out of credits.
+Interpretation:
+- `Success: True`: all good.
+- `Diagnosis: account_credits_exhausted`: wiring/auth path is still correct; only billing/quota blocks real completions.
 
-`account_credits_exhausted` still confirms binary/auth/request path wiring is correct.
+## Step 5: Confirm Continue Profile in YAML
 
-## 5. Continue Profile in config.yaml
+Config file: `config/config.yaml`
 
-The default Continue profile is in `config/config.yaml`:
+Expected profile shape:
 
 ```yaml
 agents:
@@ -91,44 +99,40 @@ agents:
       config_path: continuedev/default-cli-config
       model_slugs: []
       allow_policies: []
-      extra_args: []
+      extra_args: [--org, zhiruis-workspace-2, --auto]
 ```
 
-## 6. Run Evaluation Scripts with Continue
+## Step 6: Run Phase 1/2/3
 
-Single smoke test:
+All commands from `agentic_sys/`.
+
+### Smoke test
 
 ```bash
 python run_single_test.py --agent continue
 ```
 
-Phase1:
+### Phase1
 
 ```bash
 python integrated_mini_agent_evaluation.py --agent continue
 ```
 
-Phase2:
+### Phase2
 
 ```bash
 python enhanced_comprehensive_evaluation.py --agent continue
 ```
 
-Phase3:
+### Phase3
 
 ```bash
 python mini_agent_clear_evaluation_system.py --agent continue
 ```
 
-If using a non-default config file:
+## Step 7: Optional Runtime Overrides (No YAML edits)
 
-```bash
-python run_single_test.py --agent continue --agent-config /path/to/config.yaml
-```
-
-## 7. Optional Continue Overrides (All Scripts)
-
-All evaluation scripts accept these Continue-specific flags:
+All scripts support Continue override flags:
 
 - `--continue-agent-name <owner/agent>`
 - `--continue-config <path-or-hub-slug>`
@@ -142,13 +146,21 @@ Example:
 python run_single_test.py \
   --agent continue \
   --continue-config continuedev/default-cli-config \
-  --continue-model openai/gpt-4.1-mini \
-  --continue-extra-arg --auto
+  --continue-model openai/gpt-4.1-mini
 ```
 
-## 8. Live Continue Unit Test
+If you need to temporarily switch workspace from the default:
 
-This test sends a real request and is disabled by default.
+```bash
+python run_single_test.py \
+  --agent continue \
+  --continue-extra-arg=--org \
+  --continue-extra-arg=<other-org-slug>
+```
+
+## Step 8: Optional Live Unit Test
+
+Runs a real request and is disabled by default.
 
 ```bash
 RUN_CONTINUE_LIVE_TESTS=1 \
@@ -160,36 +172,30 @@ Optional env vars:
 - `CONTINUE_CN_EXECUTABLE`
 - `CONTINUE_CN_AGENT`
 - `CONTINUE_CN_CONFIG`
-- `CONTINUE_CN_MODELS` (comma-separated)
-- `CONTINUE_CN_ALLOW` (comma-separated)
+- `CONTINUE_CN_MODELS`
+- `CONTINUE_CN_ALLOW`
 - `CONTINUE_CN_SMOKE_PROMPT`
 - `CONTINUE_CN_TIMEOUT`
 
-## 9. Troubleshooting Matrix
+## Troubleshooting
 
-- Symptom: `cn: command not found`
-  - Fix: reinstall CLI, ensure npm global bin in `PATH`, restart shell.
+- `cn: command not found`
+  - Reinstall CLI and fix `PATH`.
+- `interceptors did not return an alternative response`
+  - Usually auth/model/config issue. Re-run `cn login` and verify config/model.
+- `fetch failed`
+  - Network/proxy/firewall issue.
+- `Response returned an error code`
+  - Provider/model/org/quota misconfiguration.
+- `no credits remaining`
+  - Account credit exhausted. Top up or use self-managed provider config.
 
-- Symptom: `interceptors did not return an alternative response`
-  - Cause: runtime reachable, but no working model/auth path.
-  - Fix: run `cn login`, or provide valid `--continue-config` + provider credentials.
+## Team Repro Checklist
 
-- Symptom: `fetch failed`
-  - Cause: network/proxy/firewall connectivity issue.
-  - Fix: verify outbound access and retry.
+Share these 4 items for reproducibility:
 
-- Symptom: `Response returned an error code`
-  - Cause: provider/model/org misconfiguration or upstream rejection.
-  - Fix: verify API keys, model slug, org selection, quota.
-
-- Symptom: `no credits remaining`
-  - Cause: Continue account credits exhausted.
-  - Fix: top up credits or switch to self-managed provider config.
-
-## 10. What to Share with Teammates
-
-For reproducibility, share:
-- the exact `config/config.yaml` profile used,
-- the exact command line used (`--agent`, overrides),
-- healthcheck output (`diagnosis`, `command`, `return_code`),
-- output directory (`phase1_continue`, `phase2_continue`, `phase3_continue`, etc.).
+1. The exact `config/config.yaml` profile.
+2. The exact command line used.
+3. Healthcheck output (`diagnosis`, `command`, `return_code`).
+4. Output directories (`phase1_continue`, `phase2_continue`, `phase3_continue`).
+5. Confirm teammate account is a member of workspace `zhiruis-workspace-2`.

@@ -1,34 +1,50 @@
-# New Agent Onboarding Guide (YAML-Only)
+# New Agent Onboarding (YAML-Only)
 
-You can onboard a new agent without writing adapter code or editing registry code.
-Add a profile in `config/config.yaml`, then run scripts with `--agent <name-or-alias>`.
+Goal: add a new agent without writing Python adapter/registry code.
 
-## 1. Preconditions
+You only edit `config/config.yaml`, then run scripts with `--agent <name-or-alias>`.
 
-Your agent must support non-interactive execution from CLI.
+If the agent uses org-level credits (for example Continue), set the org slug in adapter `extra_args` so teammates share the same billing workspace.
 
-At minimum, the command should:
-- accept a prompt/task text,
-- exit with a stable return code,
-- print useful output to stdout/stderr,
-- run without manual UI interaction.
+## Quick Start
 
-## 2. Runtime Contract Used by Pipeline
+1. Add a new `agents.<your-agent>` profile in `config/config.yaml` (template below).
+2. Run:
 
-For `generic-cli`, the pipeline builds command/env/cwd from templates.
+```bash
+python run_single_test.py --agent <your-agent>
+python integrated_mini_agent_evaluation.py --agent <your-agent>
+python enhanced_comprehensive_evaluation.py --agent <your-agent>
+python mini_agent_clear_evaluation_system.py --agent <your-agent>
+```
 
-Supported placeholders:
+3. Check agent-specific result directories.
+
+## Step 1: Runtime Requirements
+
+Your CLI runtime must:
+
+- accept task/prompt input,
+- run non-interactively,
+- produce deterministic exit codes,
+- print useful stdout/stderr.
+
+## Step 2: Understand Placeholder Contract
+
+`generic-cli` supports these placeholders:
+
 - `{workspace}`
 - `{task_prompt}`
 - `{timeout_seconds}`
 
 They can be used in:
-- `adapter.command` (list of tokens)
+
+- `adapter.command`
 - `adapter.cwd`
 - `adapter.env` values
 - `adapter.extra_args`
 
-## 3. Add a New Agent Profile in config.yaml
+## Step 3: Copy This YAML Template
 
 ```yaml
 agents:
@@ -59,54 +75,64 @@ agents:
       success_codes: [0]
 ```
 
-### Required fields
+## Step 4: Minimum Required Fields
 
 - `agents.<name>.adapter.type: generic-cli`
-- `agents.<name>.adapter.command` (or `executable`, but `command` is recommended)
+- `agents.<name>.adapter.command` (recommended) or equivalent executable definition
 
-### Recommended fields
+## Step 5: Recommended Fields
 
-- `aliases` for short CLI names
-- `scripts.*.results_dir` to separate outputs by agent
-- `process_name_hint` for better process monitoring in phase2/phase3
+- `aliases` for shorter CLI usage
+- `scripts.*.results_dir` to isolate outputs per agent
+- `process_name_hint` for better process metric binding in phase2/phase3
+- `extra_args` for default org/model/runtime flags shared by all scripts
 
-## 4. Minimal Validation Flow
+Continue example (workspace credit via org slug):
+
+```yaml
+adapter:
+  type: continue-cn
+  config_path: continuedev/default-cli-config
+  extra_args: [--org, zhiruis-workspace-2, --auto]
+```
+
+## Step 6: Validate in Order
 
 From `agentic_sys/`:
 
-1. Smoke test:
+### 6.1 Smoke
 
 ```bash
 python run_single_test.py --agent my-agent
 ```
 
-2. Phase1:
+### 6.2 Phase1
 
 ```bash
 python integrated_mini_agent_evaluation.py --agent my-agent
 ```
 
-3. Phase2:
+### 6.3 Phase2
 
 ```bash
 python enhanced_comprehensive_evaluation.py --agent my-agent
 ```
 
-4. Phase3:
+### 6.4 Phase3
 
 ```bash
 python mini_agent_clear_evaluation_system.py --agent my-agent
 ```
 
-You can also use alias:
+Alias also works:
 
 ```bash
 python run_single_test.py --agent my
 ```
 
-## 5. Optional Overrides Without Editing YAML
+## Step 7: Override Adapter Fields from CLI (Optional)
 
-Use repeatable `--adapter-option KEY=VALUE` (YAML parsed value):
+No YAML edits needed for temporary changes:
 
 ```bash
 python run_single_test.py \
@@ -115,9 +141,9 @@ python run_single_test.py \
   --adapter-option 'env={"MY_FLAG":"1"}'
 ```
 
-## 6. Common Profile Patterns
+## Common Patterns
 
-### A) Workspace-aware agent (recommended)
+### Workspace-aware CLI (recommended)
 
 ```yaml
 adapter:
@@ -127,7 +153,7 @@ adapter:
   success_codes: [0]
 ```
 
-### B) Prompt-only CLI agent
+### Prompt-only CLI
 
 ```yaml
 adapter:
@@ -137,7 +163,7 @@ adapter:
   success_codes: [0]
 ```
 
-### C) Non-zero success code agent
+### Multiple success codes
 
 ```yaml
 adapter:
@@ -146,34 +172,30 @@ adapter:
   success_codes: [0, 2]
 ```
 
-## 7. Troubleshooting
+## Troubleshooting
 
-- Error: `Unsupported placeholder ...`
-  - Fix: only use `{workspace}`, `{task_prompt}`, `{timeout_seconds}`.
+- `Unsupported placeholder ...`
+  - Use only `{workspace}`, `{task_prompt}`, `{timeout_seconds}`.
+- `Unsupported agent ...`
+  - Ensure profile exists and `--agent` matches name/alias.
+- `Execution error: [Errno 2] ...`
+  - Executable not found; use absolute path in `command[0]`.
+- Phase3 metrics look coarse
+  - Runtime lacks structured step/tool traces; system uses fair coarse attribution mode.
 
-- Error: `Unsupported agent ...`
-  - Fix: ensure `agents.<name>` exists and `--agent` matches name or alias.
-
-- Error: `Execution error: [Errno 2] ...`
-  - Fix: executable not found in `PATH`; use full binary path in `command[0]`.
-
-- Agent runs but phase3 step/tool metrics look coarse
-  - Cause: runtime logs are not structured like step/tool traces.
-  - Result: phase3 uses coarse attribution mode for fairness.
-
-## 8. Built-In Adapter Types
+## Adapter Types
 
 - `mini-agent`
 - `continue-cn`
 - `generic-cli`
 
-For new agents, use `generic-cli` first.  
-Only add custom Python adapter when your runtime is not expressible as a CLI command template (for example, direct SDK/API-only flow with complex streaming protocol).
+For most new runtimes, start with `generic-cli`.
+Only add custom Python adapter if your runtime cannot be expressed as a CLI command template.
 
-## 9. Team Onboarding Checklist
+## Team Checklist
 
-- [ ] profile added to `config/config.yaml`
-- [ ] smoke test (`run_single_test.py`) passes or produces expected failure mode
-- [ ] phase1/2/3 run end to end
-- [ ] output directories are agent-specific and documented
-- [ ] any required env vars/secrets documented outside repo
+1. Profile added in `config/config.yaml`.
+2. Smoke test completed.
+3. Phase1/2/3 completed.
+4. Agent-specific result directories confirmed.
+5. Required secrets/env documented outside repo.
