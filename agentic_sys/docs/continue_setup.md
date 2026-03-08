@@ -87,3 +87,17 @@ python clear_evaluation_system.py --agent continue
 - Do not commit API keys.
 - Do not paste keys in issues/chat/screenshots.
 - If leaked, revoke and rotate immediately.
+
+## 8) Unit Tests (Required)
+
+Before commit/merge, ensure unit tests pass at minimum:
+
+```bash
+python -m unittest discover -s tests
+```
+
+If running from repo root:
+
+```bash
+python -m unittest discover -s agentic_sys/tests
+```

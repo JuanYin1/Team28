@@ -131,3 +131,18 @@ export CONTINUE_API_KEY="<ORG_SCOPED_KEY>"
 3. Phase1/Phase2/Phase3 run end-to-end.
 4. Output directories are agent-specific.
 5. Required secrets are documented and shared securely.
+6. Unit tests pass at minimum.
+
+## 12) Unit Tests (Required)
+
+Run before handing off:
+
+```bash
+python -m unittest discover -s tests
+```
+
+If you are at repo root:
+
+```bash
+python -m unittest discover -s agentic_sys/tests
+```
