@@ -32,6 +32,11 @@ from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
 from agent_runtime.script_config import resolve_script_runtime_options
 
+TASK_HARD_CONSTRAINT_PREFIX = (
+    "Return only 6-10 sentences of analysis. Do not generate deliverable documents. "
+    "Do not write files."
+)
+
 @dataclass
 class TestCaseDefinition:
     """Enhanced test case with evaluation criteria"""
@@ -77,6 +82,9 @@ class IntegratedAgentEvaluator:
     def create_comprehensive_test_suite(self) -> List[TestCaseDefinition]:
         """Create test cases with appropriate evaluation criteria for each"""
         
+        def with_hard_constraints(prompt: str) -> str:
+            return f"{TASK_HARD_CONSTRAINT_PREFIX}\n\n{prompt}"
+
         test_cases = []
         
         # SIMPLE ARITHMETIC - MMLU-style evaluation
@@ -85,7 +93,9 @@ class IntegratedAgentEvaluator:
             category="reasoning",
             complexity="simple",
             description="Basic arithmetic with step-by-step reasoning",
-            task_prompt="Calculate 25% of 160, then multiply by 3. Show your work step by step.",
+            task_prompt=with_hard_constraints(
+                "Calculate 25% of 160, then multiply by 3. Show your work step by step."
+            ),
             evaluation_criteria=EvaluationCriteria(
                 evaluation_type="keyword",
                 expected_keywords=["25%", "160", "40", "120", "0.25"],
@@ -104,7 +114,7 @@ class IntegratedAgentEvaluator:
             category="reasoning",
             complexity="medium",
             description="Multi-step logic puzzle requiring systematic reasoning",
-            task_prompt="""Solve this logic puzzle step by step:
+            task_prompt=with_hard_constraints("""Solve this logic puzzle step by step:
 
 Three friends (Alex, Blake, Casey) each own a different pet (cat, dog, bird) and prefer different colors (red, blue, green).
 
@@ -115,7 +125,7 @@ Clues:
 4. Casey doesn't like green
 5. The person who likes red has a bird
 
-Who has which pet and likes which color?""",
+Who has which pet and likes which color?"""),
             evaluation_criteria=EvaluationCriteria(
                 evaluation_type="hybrid",
                 expected_keywords=["alex", "blake", "casey", "cat", "dog", "bird", "red", "blue", "green"],
@@ -134,12 +144,12 @@ Who has which pet and likes which color?""",
             category="programming",
             complexity="medium", 
             description="Create, modify, and analyze files",
-            task_prompt="""Perform these file operations:
+            task_prompt=with_hard_constraints("""Perform these file operations:
 
 1. Create a file called 'data.txt' with numbers 1 through 10, one per line
 2. Read the file and calculate the sum of all numbers
 3. Create a second file called 'summary.txt' with the result
-4. Confirm both files exist and show their contents""",
+4. Confirm both files exist and show their contents"""),
             evaluation_criteria=EvaluationCriteria(
                 evaluation_type="execution",
                 execution_tests=[
@@ -163,7 +173,7 @@ Who has which pet and likes which color?""",
             category="programming",
             complexity="complex",
             description="Debug and fix a Python function with multiple issues",
-            task_prompt="""Debug this Python function that has several bugs:
+            task_prompt=with_hard_constraints("""Debug this Python function that has several bugs:
 
 ```python
 def find_average(numbers):
@@ -183,7 +193,7 @@ print(find_average(["1", "2", "3"]))  # This might cause issues
 1. Identify all the bugs
 2. Provide a corrected version
 3. Explain what each bug was and how you fixed it
-4. Test your corrected version""",
+4. Test your corrected version"""),
             evaluation_criteria=EvaluationCriteria(
                 evaluation_type="hybrid",
                 expected_keywords=["division by zero", "empty list", "type", "string", "int", "float", "exception"],
@@ -207,7 +217,7 @@ print(find_average(["1", "2", "3"]))  # This might cause issues
             category="analysis",
             complexity="complex",
             description="Analyze system architecture and propose improvements",
-            task_prompt="""You are analyzing a simple web application architecture:
+            task_prompt=with_hard_constraints("""You are analyzing a simple web application architecture:
 
 Current setup:
 - Frontend: Single-page React app
@@ -226,7 +236,7 @@ Analyze this architecture and propose specific improvements for:
 3. Reliability improvements
 4. Deployment process
 
-Provide reasoning for each recommendation.""",
+Provide reasoning for each recommendation."""),
             evaluation_criteria=EvaluationCriteria(
                 evaluation_type="hybrid",
                 expected_keywords=["cache", "load", "database", "scale", "cdn", "microservice", "deployment", "monitoring"],
@@ -236,7 +246,7 @@ Provide reasoning for each recommendation.""",
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=360
+            max_time_seconds=180
         ))
         
         return test_cases
