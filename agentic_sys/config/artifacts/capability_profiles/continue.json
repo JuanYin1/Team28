@@ -1,0 +1,82 @@
+{
+  "agent_id": "continue",
+  "declared_capabilities": {
+    "structured_trace": false,
+    "tool_trace": false,
+    "step_trace": false,
+    "timeline_events": false,
+    "session_stats": false,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": true,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "probed_capabilities": {
+    "structured_trace": false,
+    "tool_trace": false,
+    "step_trace": false,
+    "timeline_events": false,
+    "session_stats": false,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": false,
+      "stdout_capture": false,
+      "exit_code": true,
+      "behavior_validation": false
+    }
+  },
+  "resolved_capabilities": {
+    "structured_trace": false,
+    "tool_trace": false,
+    "step_trace": false,
+    "timeline_events": false,
+    "session_stats": false,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": false,
+      "stdout_capture": false,
+      "exit_code": true,
+      "behavior_validation": false
+    }
+  },
+  "probe_results": [
+    {
+      "success": false,
+      "return_code": 1,
+      "reported_duration_s": 12.559107780456543,
+      "wall_clock_duration_s": 12.560006141662598,
+      "artifact_exists": false
+    },
+    {
+      "success": false,
+      "return_code": 1,
+      "reported_duration_s": 12.490256071090698,
+      "wall_clock_duration_s": 12.492168188095093,
+      "artifact_exists": false
+    },
+    {
+      "success": false,
+      "return_code": 1,
+      "reported_duration_s": 13.859899044036865,
+      "wall_clock_duration_s": 13.860360860824585,
+      "artifact_exists": false
+    },
+    {
+      "success": false,
+      "return_code": 1,
+      "reported_duration_s": 3.425199031829834,
+      "wall_clock_duration_s": 3.425339937210083,
+      "artifact_exists": false
+    }
+  ],
+  "generated_at_unix": 1773036749
+}

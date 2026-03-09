@@ -1,0 +1,82 @@
+{
+  "agent_id": "mini-agent",
+  "declared_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": true,
+    "timeline_events": true,
+    "session_stats": true,
+    "provider_cost": true,
+    "token_usage": true,
+    "skills_runtime": true,
+    "checker_support": {
+      "file_artifacts": true,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "probed_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": false,
+    "timeline_events": true,
+    "session_stats": true,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": true,
+    "checker_support": {
+      "file_artifacts": false,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "resolved_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": false,
+    "timeline_events": true,
+    "session_stats": true,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": true,
+    "checker_support": {
+      "file_artifacts": false,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "probe_results": [
+    {
+      "success": true,
+      "return_code": 0,
+      "reported_duration_s": 7.588066101074219,
+      "wall_clock_duration_s": 7.588240146636963,
+      "artifact_exists": false
+    },
+    {
+      "success": true,
+      "return_code": 0,
+      "reported_duration_s": 7.342441082000732,
+      "wall_clock_duration_s": 7.3425798416137695,
+      "artifact_exists": false
+    },
+    {
+      "success": true,
+      "return_code": 0,
+      "reported_duration_s": 7.844867706298828,
+      "wall_clock_duration_s": 7.8450329303741455,
+      "artifact_exists": false
+    },
+    {
+      "success": true,
+      "return_code": 0,
+      "reported_duration_s": 8.077852249145508,
+      "wall_clock_duration_s": 8.078097820281982,
+      "artifact_exists": false
+    }
+  ],
+  "generated_at_unix": 1773037273
+}
