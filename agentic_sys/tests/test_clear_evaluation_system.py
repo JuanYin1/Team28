@@ -181,6 +181,14 @@ Executing tool {"toolName":"Write"}
         self.assertEqual(mini_analysis["trace_signal_quality"], 0.5)
         self.assertEqual(generic_analysis["trace_signal_quality"], 0.5)
 
+    def test_default_parser_patterns_are_runtime_neutral(self):
+        mini = AgentLogAnalyzer(runtime_profile="mini-agent")
+        generic = AgentLogAnalyzer(runtime_profile="custom")
+
+        self.assertEqual(mini.step_patterns, generic.step_patterns)
+        self.assertEqual(mini.thinking_patterns, generic.thinking_patterns)
+        self.assertEqual(mini.assistant_patterns, generic.assistant_patterns)
+
 
 class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
     async def test_execute_task_uses_adapter_and_binds_monitor_pid(self):
@@ -929,6 +937,58 @@ class AgentV2ScoringTests(unittest.TestCase):
         self.assertLessEqual(aggregated.overall_v2_score, 0.8)
         self.assertIn("overall_v2_std", aggregated.repeat_stats)
 
+    def test_repeated_run_aggregation_preserves_oracle_not_applicable_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 2},
+            )
+
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+            )
+
+            run_a = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.0, steps_to_completion=3, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.8, confidence=0.8, passed=True),
+                overall_clear_score=0.8,
+                overall_v2_score=0.8,
+                passed_all_thresholds=True,
+                confidence_score=0.8,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "not_applicable"},
+                },
+            )
+            run_b = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=3.0, steps_to_completion=4, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.7, confidence=0.7, passed=True),
+                overall_clear_score=0.7,
+                overall_v2_score=0.7,
+                passed_all_thresholds=True,
+                confidence_score=0.7,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "not_applicable"},
+                },
+            )
+
+            aggregated = evaluator._aggregate_repeated_results(test_case, [run_a, run_b])
+
+        self.assertEqual(
+            aggregated.gate_status["oracle_gate"]["status"],
+            "not_applicable",
+        )
+
     def test_config_can_disable_runtime_extension_suite(self):
         with tempfile.TemporaryDirectory() as tmp:
             evaluator = AgentCLEAREvaluator(
@@ -1066,11 +1126,142 @@ class AgentV2ScoringTests(unittest.TestCase):
                 clear_metrics=clear_metrics,
                 evaluation_result=eval_result,
                 log_analysis=log_analysis,
+                run_scores=[0.9, 0.9, 0.9],
+                run_successes=[1.0, 1.0, 1.0],
             )
 
         self.assertTrue(scored["is_provisional"])
         self.assertEqual(scored["comparability"]["status"], "SOFT_NON_COMPARABLE")
         self.assertFalse(scored["comparability"]["eligible_for_main_leaderboard"])
+
+    def test_repeated_runs_required_signal_needs_observed_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 3},
+            )
+
+        test_case = AgentTestCase(
+            name="case",
+            category="analysis",
+            description="d",
+            task_prompt="p",
+            evaluation_criteria=AgentTestCriteria(),
+            core_comparable=True,
+        )
+        clear_metrics = AgentCLEARMetrics(
+            execution_success_rate=1.0,
+            supports_structured_trace=True,
+        )
+        eval_result = EvaluationResult(overall_score=0.9, correctness_score=0.9)
+        log_analysis = {"raw_text": "", "detailed_timeline": [], "total_steps": 1}
+
+        with patch.object(
+            evaluator,
+            "_calculate_outcome_dimension_v2",
+            return_value=(
+                0.9,
+                {
+                    "primary_tier": "exact",
+                    "tier_scores": {"exact": 0.9},
+                    "high_supervision_available": True,
+                    "high_supervision_score": 0.9,
+                    "high_supervision_coverage": 1.0,
+                    "checker_executed": True,
+                    "include_in_total_score": False,
+                },
+            ),
+        ), patch.object(evaluator, "_calculate_process_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_efficiency_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_robustness_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_safety_dimension_v2", return_value=(0.9, [])):
+            scored = evaluator._compute_v2_scoring(
+                test_case=test_case,
+                stdout="ok",
+                stderr="",
+                clear_metrics=clear_metrics,
+                evaluation_result=eval_result,
+                log_analysis=log_analysis,
+            )
+
+        self.assertFalse(scored["comparability"]["required_signal_status"]["repeated_runs"])
+        self.assertEqual(scored["comparability"]["status"], "HARD_NON_COMPARABLE")
+
+    def test_aggregation_recomputes_repeated_run_signal_for_comparability(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 2},
+            )
+
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+                core_comparable=True,
+            )
+            details = {
+                "outcome": {"score": 0.9, "supported": True, "observed": True},
+                "safety": {"score": 0.9, "supported": True, "observed": True},
+                "robustness": {"score": 0.9, "supported": True, "observed": True},
+                "basic_efficiency": {"score": 0.9, "supported": True, "observed": True},
+            }
+            non_comparable = {
+                "status": "HARD_NON_COMPARABLE",
+                "core_status": "HARD_NON_COMPARABLE",
+                "full_status": "HARD_NON_COMPARABLE",
+                "reasons": ["Comparable dimension 'robustness' missing required signal 'repeated_runs'"],
+                "core_reasons": ["Comparable dimension 'robustness' missing required signal 'repeated_runs'"],
+                "full_reasons": ["Comparable dimension 'robustness' missing required signal 'repeated_runs'"],
+                "required_signal_status": {
+                    "checker_executed": True,
+                    "repeated_runs": False,
+                    "wall_clock_time": True,
+                },
+            }
+            run_a = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.0, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.9, confidence=0.9, passed=True),
+                overall_clear_score=0.9,
+                overall_v2_score=0.9,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                v2_dimension_details=details,
+                evidence_quality={"checker_executed": True, "high_supervision_coverage": 1.0},
+                comparability=non_comparable,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "not_applicable"},
+                },
+            )
+            run_b = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.5, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.88, confidence=0.9, passed=True),
+                overall_clear_score=0.88,
+                overall_v2_score=0.88,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                v2_dimension_details=details,
+                evidence_quality={"checker_executed": True, "high_supervision_coverage": 1.0},
+                comparability=non_comparable,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "not_applicable"},
+                },
+            )
+
+            aggregated = evaluator._aggregate_repeated_results(test_case, [run_a, run_b])
+
+        self.assertTrue(aggregated.comparability["required_signal_status"]["repeated_runs"])
+        self.assertEqual(aggregated.comparability["status"], "COMPARABLE")
 
     def test_gate_cap_applies_boundary_caps_for_safety_critical_and_oracle(self):
         with tempfile.TemporaryDirectory() as tmp:

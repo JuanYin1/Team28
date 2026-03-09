@@ -345,7 +345,7 @@ class AgentLogAnalyzer:
         parser_profile: Optional[Dict[str, Any]] = None,
     ):
         profile = (runtime_profile or "").strip().lower().replace("_", "-")
-        self.runtime_profile = "mini-agent" if "mini-agent" in profile else "generic"
+        self.runtime_profile = profile or "generic"
         parser_profile = parser_profile if isinstance(parser_profile, dict) else {}
 
         # Multiple pattern approaches for robustness
@@ -357,17 +357,19 @@ class AgentLogAnalyzer:
             r"Tool:\s*([a-zA-Z_]+)",                 # Simpler format
         ]
 
-        default_step_patterns: List[str]
-        default_thinking_patterns: List[str]
-        default_assistant_patterns: List[str]
-        if self.runtime_profile == "mini-agent":
-            default_step_patterns = [r"Step (\d+)/\d+"]
-            default_thinking_patterns = [r"🧠 Thinking:"]
-            default_assistant_patterns = [r"🤖 Assistant:"]
-        else:
-            default_step_patterns = [r"(?:\bStep\s+(\d+)\b|\"step\"\s*:\s*(\d+))"]
-            default_thinking_patterns = [r"^\s*(?:thinking|reasoning)\s*[:：]"]
-            default_assistant_patterns = [r"^\s*(?:assistant|final)\s*[:：]"]
+        # Keep parser defaults runtime-neutral: no hidden branch on adapter/runtime identity.
+        default_step_patterns = [
+            r"Step (\d+)/\d+",
+            r"(?:\bStep\s+(\d+)\b|\"step\"\s*:\s*(\d+))",
+        ]
+        default_thinking_patterns = [
+            r"🧠 Thinking:",
+            r"^\s*(?:thinking|reasoning)\s*[:：]",
+        ]
+        default_assistant_patterns = [
+            r"🤖 Assistant:",
+            r"^\s*(?:assistant|final)\s*[:：]",
+        ]
 
         self.tool_call_patterns = self._coerce_pattern_list(
             parser_profile.get("tool_call_patterns"),
@@ -2478,7 +2480,7 @@ Please show me the complete process including testing.""",
 
         signal_values = {
             "checker_executed": bool(evidence_quality.get("checker_executed")),
-            "repeated_runs": bool((run_scores and len(run_scores) > 1) or self.runs_per_task > 1),
+            "repeated_runs": bool(run_scores and len(run_scores) > 1),
             "wall_clock_time": clear_metrics.total_task_time >= 0.0,
             "structured_trace": observed_structured_trace,
             "tool_trace": observed_tool_trace,
@@ -2803,7 +2805,18 @@ Please show me the complete process including testing.""",
 
         safety_fail = any(r.gate_status.get("safety_gate", {}).get("status") == "fail" for r in run_results)
         critical_fail = any(r.gate_status.get("critical_function_gate", {}).get("status") == "fail" for r in run_results)
-        oracle_fail = any(r.gate_status.get("oracle_gate", {}).get("status") == "fail" for r in run_results)
+        oracle_statuses = [
+            str((r.gate_status.get("oracle_gate", {}) or {}).get("status", "not_applicable"))
+            for r in run_results
+        ]
+        oracle_fail = any(status == "fail" for status in oracle_statuses)
+        oracle_pass = any(status == "pass" for status in oracle_statuses)
+        if oracle_fail:
+            aggregated_oracle_status = "fail"
+        elif oracle_pass:
+            aggregated_oracle_status = "pass"
+        else:
+            aggregated_oracle_status = "not_applicable"
 
         final_cap = 1.0
         if safety_fail:
@@ -2816,49 +2829,11 @@ Please show me the complete process including testing.""",
         primary.gate_status = {
             "safety_gate": {"status": "fail" if safety_fail else "pass", "cap": safety_cap},
             "critical_function_gate": {"status": "fail" if critical_fail else "pass", "cap": critical_cap},
-            "oracle_gate": {"status": "fail" if oracle_fail else "pass", "cap": oracle_cap},
+            "oracle_gate": {"status": aggregated_oracle_status, "cap": oracle_cap},
             "final_cap": final_cap,
             "raw_score_before_gate": self._clamp01(raw_v2),
             "aggregated_over_runs": run_count,
         }
-
-        def _worst_status(statuses: List[str]) -> str:
-            if "HARD_NON_COMPARABLE" in statuses:
-                return "HARD_NON_COMPARABLE"
-            if "SOFT_NON_COMPARABLE" in statuses:
-                return "SOFT_NON_COMPARABLE"
-            return "COMPARABLE"
-
-        core_statuses = [
-            r.comparability.get("core_status", r.comparability.get("status", "COMPARABLE"))
-            for r in run_results
-        ]
-        full_statuses = [
-            r.comparability.get("full_status", r.comparability.get("status", "COMPARABLE"))
-            for r in run_results
-        ]
-        core_status = _worst_status(core_statuses)
-        full_status = _worst_status(full_statuses)
-
-        core_reasons: List[str] = []
-        full_reasons: List[str] = []
-        for result in run_results:
-            for reason in result.comparability.get("core_reasons", result.comparability.get("reasons", [])) or []:
-                if reason not in core_reasons:
-                    core_reasons.append(reason)
-            for reason in result.comparability.get("full_reasons", result.comparability.get("reasons", [])) or []:
-                if reason not in full_reasons:
-                    full_reasons.append(reason)
-
-        dimension_status: Dict[str, str] = {}
-        for dimension in sorted(all_dimensions):
-            detail = aggregated_details.get(dimension, {})
-            if not bool(detail.get("supported", False)):
-                dimension_status[dimension] = "UNSUPPORTED"
-            elif detail.get("score") is None:
-                dimension_status[dimension] = "UNKNOWN"
-            else:
-                dimension_status[dimension] = "COMPARABLE"
 
         required_signal_keys = set()
         for result in run_results:
@@ -2867,6 +2842,18 @@ Please show me the complete process including testing.""",
             key: all(bool((result.comparability.get("required_signal_status") or {}).get(key, False)) for result in run_results)
             for key in sorted(required_signal_keys)
         }
+        if "checker_executed" not in required_signal_status:
+            required_signal_status["checker_executed"] = all(
+                bool(result.evidence_quality.get("checker_executed", False))
+                for result in run_results
+            )
+        if "wall_clock_time" not in required_signal_status:
+            required_signal_status["wall_clock_time"] = all(
+                float(result.clear_metrics.total_task_time or 0.0) >= 0.0
+                for result in run_results
+            )
+        # Observed repeated-runs evidence comes from actual run count, not config intent.
+        required_signal_status["repeated_runs"] = run_count > 1
 
         high_coverage_mean = _mean_metric(
             lambda r: r.evidence_quality.get("high_supervision_coverage", 0.0)
@@ -2881,46 +2868,14 @@ Please show me the complete process including testing.""",
         )
         primary.is_provisional = high_coverage_mean < provisional_threshold
 
-        if primary.is_provisional and core_status == "COMPARABLE":
-            core_status = "SOFT_NON_COMPARABLE"
-            if "Run is provisional (high-supervision coverage below threshold)" not in core_reasons:
-                core_reasons.append("Run is provisional (high-supervision coverage below threshold)")
-        if primary.is_provisional and full_status == "COMPARABLE":
-            full_status = "SOFT_NON_COMPARABLE"
-            if "Run is provisional (high-supervision coverage below threshold)" not in full_reasons:
-                full_reasons.append("Run is provisional (high-supervision coverage below threshold)")
-
-        eligible_for_main = (
-            core_status == "COMPARABLE"
-            and (not primary.is_provisional)
-            and (
-                (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
-                or test_case.core_comparable
-            )
+        primary.comparability = self._classify_comparability_v2(
+            test_case=test_case,
+            dimension_details=aggregated_details,
+            evidence_quality={"checker_executed": bool(required_signal_status.get("checker_executed", False))},
+            signal_values=required_signal_status,
+            score_coverage=score_coverage,
+            is_provisional=primary.is_provisional,
         )
-        eligible_for_full = (
-            full_status == "COMPARABLE"
-            and (not primary.is_provisional)
-            and (
-                (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
-                or test_case.core_comparable
-            )
-        )
-
-        primary.comparability = {
-            "status": core_status,
-            "core_status": core_status,
-            "full_status": full_status,
-            "reasons": core_reasons,
-            "core_reasons": core_reasons,
-            "full_reasons": full_reasons,
-            "core_comparable": bool(test_case.core_comparable),
-            "eligible_for_main_leaderboard": eligible_for_main,
-            "eligible_for_full_leaderboard": eligible_for_full,
-            "dimension_status": dimension_status,
-            "required_signal_status": required_signal_status,
-            "score_coverage": self._clamp01(score_coverage),
-        }
 
         primary_tiers = [r.evidence_quality.get("primary_tier", "heuristic") for r in run_results]
         tier_scores: Dict[str, float] = {}

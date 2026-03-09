@@ -1,0 +1,5 @@
+test_case,diagnostic_v2_score,full_status,eligible_for_full_leaderboard,is_provisional
+simple_file_operations,0.971115,COMPARABLE,True,False
+python_coding_task,0.830858,COMPARABLE,True,False
+data_analysis_task,0.870522,COMPARABLE,True,False
+error_handling_test,0.905364,COMPARABLE,True,False
