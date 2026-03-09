@@ -51,6 +51,15 @@ def _read_config_yaml(config_path: Optional[str]) -> Tuple[Dict[str, Any], Optio
     return loaded, path
 
 
+def read_agent_config(config_path: Optional[str] = None) -> Tuple[Dict[str, Any], Optional[Path]]:
+    """
+    Public helper for loading the shared agent/evaluation config YAML.
+
+    Returns (config_mapping, source_path). Missing files return ({}, None).
+    """
+    return _read_config_yaml(config_path)
+
+
 def _normalize_name(raw: Any) -> str:
     return str(raw or "").strip().lower().replace("_", "-")
 
@@ -179,3 +188,41 @@ def resolve_script_runtime_options(
     )
 
     return results_dir, adapter_kwargs, source_path
+
+
+def resolve_evaluation_settings(
+    *,
+    config_path: Optional[str] = None,
+    script_name: Optional[str] = None,
+) -> Tuple[Dict[str, Any], Optional[Path]]:
+    """
+    Resolve evaluation settings from config.yaml.
+
+    Precedence:
+      1) evaluation.scripts.<script_name>
+      2) evaluation.shared
+      3) evaluation (flat keys excluding helper maps)
+    """
+    config_data, source_path = _read_config_yaml(config_path)
+    evaluation_cfg = config_data.get("evaluation") or {}
+    if not isinstance(evaluation_cfg, dict):
+        return {}, source_path
+
+    resolved: Dict[str, Any] = {}
+
+    shared_cfg = evaluation_cfg.get("shared")
+    if isinstance(shared_cfg, dict):
+        resolved.update({k: _copy_value(v) for k, v in shared_cfg.items()})
+
+    for key, value in evaluation_cfg.items():
+        if key in {"shared", "scripts"}:
+            continue
+        resolved[key] = _copy_value(value)
+
+    scripts_cfg = evaluation_cfg.get("scripts")
+    if script_name and isinstance(scripts_cfg, dict):
+        script_cfg = scripts_cfg.get(script_name)
+        if isinstance(script_cfg, dict):
+            resolved.update({k: _copy_value(v) for k, v in script_cfg.items()})
+
+    return resolved, source_path

@@ -1,5 +1,54 @@
 version: 2
 
+evaluation:
+  shared:
+    scoring_version: v2
+    runs_per_task: 3
+    include_runtime_extension_suite: false
+    minimum_high_supervision_coverage: 0.40
+    main_leaderboard_core_suite_only: true
+  v2:
+    evidence_quality:
+      include_in_total_score: false
+      provisional_if_below_high_supervision_coverage: 0.40
+    comparability:
+      hard_requirements:
+        checker_must_run: true
+      soft_requirements:
+        structured_trace_preferred: true
+    normalization:
+      mode: task_family_baseline
+      baseline_by_task_type:
+        file_ops:
+          latency_seconds: 45.0
+          cost_usd: 0.10
+          steps: 8
+          memory_mb: 256
+        coding:
+          latency_seconds: 90.0
+          cost_usd: 0.20
+          steps: 12
+          memory_mb: 384
+        analysis:
+          latency_seconds: 120.0
+          cost_usd: 0.25
+          steps: 15
+          memory_mb: 512
+        reasoning:
+          latency_seconds: 80.0
+          cost_usd: 0.12
+          steps: 10
+          memory_mb: 256
+        skills:
+          latency_seconds: 90.0
+          cost_usd: 0.20
+          steps: 10
+          memory_mb: 384
+    gate_caps:
+      safety: 0.20
+      critical: 0.45
+      oracle: 0.60
+
 agents:
   mini-agent:
     aliases: [mini]

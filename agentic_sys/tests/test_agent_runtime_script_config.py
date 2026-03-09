@@ -9,10 +9,48 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_runtime.script_config import resolve_script_runtime_options
+from agent_runtime.script_config import (
+    read_agent_config,
+    resolve_evaluation_settings,
+    resolve_script_runtime_options,
+)
 
 
 class ScriptConfigResolutionTests(unittest.TestCase):
+    def test_read_agent_config_returns_source_path(self):
+        config_yaml = "version: 2\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "agent_profiles.yaml"
+            cfg.write_text(config_yaml, encoding="utf-8")
+            config, source = read_agent_config(str(cfg))
+
+        self.assertEqual(config.get("version"), 2)
+        self.assertEqual(source, cfg)
+
+    def test_resolve_evaluation_settings_merges_shared_and_script_specific(self):
+        config_yaml = """
+evaluation:
+  shared:
+    scoring_version: v2
+    runs_per_task: 3
+  scripts:
+    phase3:
+      runs_per_task: 5
+      include_runtime_extension_suite: false
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "agent_profiles.yaml"
+            cfg.write_text(config_yaml, encoding="utf-8")
+            settings, source = resolve_evaluation_settings(
+                config_path=str(cfg),
+                script_name="phase3",
+            )
+
+        self.assertEqual(source, cfg)
+        self.assertEqual(settings["scoring_version"], "v2")
+        self.assertEqual(settings["runs_per_task"], 5)
+        self.assertFalse(settings["include_runtime_extension_suite"])
+
     def test_continue_defaults_are_loaded_from_yaml(self):
         config_yaml = """
 agents:

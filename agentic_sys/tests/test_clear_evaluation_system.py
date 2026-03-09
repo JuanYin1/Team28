@@ -348,6 +348,58 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.clear_metrics.cost_is_estimated)
         self.assertTrue(result.passed_all_thresholds)
 
+    async def test_v2_pass_is_not_blocked_by_legacy_absolute_step_threshold(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(max_acceptable_steps=1),
+            )
+
+            fake_log_analysis = {
+                "total_steps": 6,
+                "tools_used": ["write_file", "bash"],
+                "tool_call_count": 2,
+                "thinking_blocks": 1,
+                "assistant_responses": 1,
+                "errors_encountered": 0,
+                "successful_operations": 2,
+                "step_breakdown": [],
+                "execution_timeline": [],
+                "session_stats": {},
+                "log_sources": ["stdout"],
+                "session_duration": {},
+                "tool_timings": [],
+                "detailed_timeline": [],
+                "has_structured_trace": True,
+                "trace_signal_quality": 1.0,
+            }
+            eval_result = EvaluationResult(
+                overall_score=0.95,
+                passed=True,
+                confidence=0.95,
+                correctness_score=0.95,
+                completeness_score=0.95,
+                reasoning_score=0.95,
+                efficiency_score=1.0,
+                execution_score=1.0,
+                failed_criteria=[],
+                reasoning="ok",
+            )
+
+            with patch.object(evaluator, "execute_agent_task", AsyncMock(return_value=("stdout", "", True, 2.0))), \
+                 patch.object(evaluator.resource_monitor, "start_monitoring"), \
+                 patch.object(evaluator.resource_monitor, "stop_monitoring", return_value=(2.0, 64.0, 5.0)), \
+                 patch.object(evaluator.resource_monitor, "get_resource_at", return_value=(64.0, 5.0)), \
+                 patch.object(evaluator.log_analyzer, "analyze_execution_log", return_value=fake_log_analysis), \
+                 patch.object(evaluator.advanced_evaluator, "evaluate_response", return_value=eval_result):
+                result = await evaluator.evaluate_agent_test(test_case)
+
+        self.assertTrue(result.passed_all_thresholds)
+
     async def test_monitor_is_stopped_when_execute_task_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
@@ -396,9 +448,13 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(saved), 1)
             payload = json.loads(saved[0].read_text())
 
-        self.assertEqual(payload["schema_version"], "phase3.v2")
+        self.assertEqual(payload["schema_version"], "phase3.v3")
         self.assertIn("time_breakdown", payload)
         self.assertIn("step_resource_profiles", payload)
+        self.assertIn("evidence_quality", payload)
+        self.assertIn("comparability", payload)
+        self.assertIn("gate_status", payload)
+        self.assertIn("repeat_stats", payload)
 
     async def test_generated_report_uses_none_placeholder_for_empty_improvements(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -561,6 +617,151 @@ class AgentTimeBreakdownTests(unittest.TestCase):
 
         self.assertEqual(breakdown["tool_events"], 2)
         self.assertGreater(breakdown["tool_execution_s"], 0.0)
+
+
+class AgentV2ScoringTests(unittest.TestCase):
+    def test_process_dimension_penalizes_redundant_retries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        criteria = AgentTestCriteria(max_acceptable_steps=10)
+        base_metrics = AgentCLEARMetrics(
+            execution_success_rate=1.0,
+            tool_selection_accuracy=1.0,
+            error_recovery_effectiveness=1.0,
+            steps_to_completion=6,
+        )
+        clean_log = {
+            "detailed_timeline": [
+                {"event_type": "tool_call", "tool_name": "read_file"},
+                {"event_type": "tool_call", "tool_name": "write_file"},
+            ],
+            "raw_text": "",
+            "total_steps": 6,
+        }
+        retry_log = {
+            "detailed_timeline": [
+                {"event_type": "tool_call", "tool_name": "read_file"},
+                {"event_type": "tool_call", "tool_name": "read_file"},
+                {"event_type": "tool_call", "tool_name": "read_file"},
+                {"event_type": "tool_call", "tool_name": "write_file"},
+            ],
+            "raw_text": "",
+            "total_steps": 6,
+        }
+
+        clean_score = evaluator._calculate_process_dimension_v2(
+            clear_metrics=base_metrics,
+            log_analysis=clean_log,
+            criteria=criteria,
+        )
+        retry_score = evaluator._calculate_process_dimension_v2(
+            clear_metrics=base_metrics,
+            log_analysis=retry_log,
+            criteria=criteria,
+        )
+
+        self.assertGreater(clean_score, retry_score)
+
+    def test_outcome_dimension_prefers_executable_signal_over_heuristic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        test_case = AgentTestCase(
+            name="case",
+            category="file_operations",
+            description="d",
+            task_prompt="p",
+            expected_file_changes=["result.txt"],
+            expected_outputs=["result.txt", "15"],
+            success_indicators=["sum", "created"],
+            evaluation_criteria=AgentTestCriteria(),
+        )
+        clear_metrics = AgentCLEARMetrics(execution_success_rate=1.0)
+        eval_result = EvaluationResult(overall_score=0.2, correctness_score=0.2)
+        score, evidence = evaluator._calculate_outcome_dimension_v2(
+            test_case=test_case,
+            stdout="Created result.txt with value 15",
+            clear_metrics=clear_metrics,
+            evaluation_result=eval_result,
+        )
+
+        self.assertGreater(score, 0.7)
+        self.assertEqual(evidence["primary_tier"], "oracle/executable")
+        self.assertFalse(evidence["include_in_total_score"])
+
+    def test_repeated_run_aggregation_generates_repeat_stats(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 3},
+            )
+
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+            )
+
+            base_result = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.0, steps_to_completion=3, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.8, confidence=0.8, passed=True),
+                overall_clear_score=0.8,
+                overall_v2_score=0.8,
+                passed_all_thresholds=True,
+                confidence_score=0.8,
+                dimension_scores={"cost": 0.8},
+                v2_dimension_scores={"outcome": 0.8, "process": 0.8, "efficiency": 0.8, "robustness": 0.8, "safety": 0.8},
+                evidence_quality={"high_supervision_coverage": 1.0, "primary_tier": "exact", "tier_scores": {"exact": 0.8}},
+                comparability={"status": "COMPARABLE", "reasons": [], "eligible_for_main_leaderboard": True},
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+                is_provisional=False,
+            )
+            second = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=3.0, steps_to_completion=5, execution_success_rate=0.0),
+                evaluation_result=EvaluationResult(overall_score=0.6, confidence=0.6, passed=False),
+                overall_clear_score=0.6,
+                overall_v2_score=0.6,
+                passed_all_thresholds=False,
+                confidence_score=0.6,
+                dimension_scores={"cost": 0.6},
+                v2_dimension_scores={"outcome": 0.6, "process": 0.5, "efficiency": 0.6, "robustness": 0.5, "safety": 0.4},
+                evidence_quality={"high_supervision_coverage": 1.0, "primary_tier": "exact", "tier_scores": {"exact": 0.6}},
+                comparability={"status": "COMPARABLE", "reasons": [], "eligible_for_main_leaderboard": True},
+                gate_status={
+                    "safety_gate": {"status": "fail"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+                is_provisional=False,
+            )
+
+            aggregated = evaluator._aggregate_repeated_results(test_case, [base_result, second])
+
+        self.assertEqual(aggregated.repeat_stats["run_count"], 2)
+        self.assertAlmostEqual(aggregated.repeat_stats["pass_rate"], 0.5)
+        self.assertLessEqual(aggregated.overall_v2_score, 0.8)
+        self.assertIn("overall_v2_std", aggregated.repeat_stats)
+
+    def test_config_can_disable_runtime_extension_suite(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"include_runtime_extension_suite": False},
+            )
+            tests = evaluator.create_agent_test_suite()
+
+        self.assertNotIn("skills_usage", [t.category for t in tests])
 
 
 if __name__ == "__main__":

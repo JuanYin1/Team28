@@ -26,6 +26,7 @@ import time
 import traceback
 import tempfile
 import re
+import statistics
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any, Tuple
@@ -49,7 +50,10 @@ from advanced_evaluation_system import (
 from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
-from agent_runtime.script_config import resolve_script_runtime_options
+from agent_runtime.script_config import (
+    resolve_evaluation_settings,
+    resolve_script_runtime_options,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +171,7 @@ class AgentTestCase:
     
     # Ground truth for comparison
     ground_truth_answer: Optional[str] = None
+    core_comparable: bool = True
 
 @dataclass
 class AgentEvaluationResult:
@@ -193,8 +198,15 @@ class AgentEvaluationResult:
     
     # Insights
     dimension_scores: Dict[str, float] = field(default_factory=dict)
+    v2_dimension_scores: Dict[str, float] = field(default_factory=dict)
     failed_criteria: List[str] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
+    evidence_quality: Dict[str, Any] = field(default_factory=dict)
+    comparability: Dict[str, Any] = field(default_factory=dict)
+    gate_status: Dict[str, Any] = field(default_factory=dict)
+    overall_v2_score: float = 0.0
+    is_provisional: bool = False
+    repeat_stats: Dict[str, Any] = field(default_factory=dict)
 
     # Execution time breakdown: LLM inference / tool calls / coordination
     time_breakdown: Dict[str, Any] = field(default_factory=dict)
@@ -659,6 +671,7 @@ class AgentCLEAREvaluator:
         results_dir: str = "artifacts/mini-agent/phase3",
         runtime_path: Optional[str] = None,
         agent_adapter: Optional[AgentAdapter] = None,
+        evaluation_settings: Optional[Dict[str, Any]] = None,
     ):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -685,11 +698,17 @@ class AgentCLEAREvaluator:
             enforce_known_tools=self._runtime_uses_native_tool_semantics,
             runtime_profile=self._agent_label(),
         )
+        self.evaluation_settings = self._normalize_evaluation_settings(evaluation_settings or {})
+        self.runs_per_task = max(1, int(self.evaluation_settings.get("runs_per_task", 1)))
+        self.include_runtime_extension_suite = bool(
+            self.evaluation_settings.get("include_runtime_extension_suite", True)
+        )
         
         # Logging setup
         logging.basicConfig(level=logging.INFO)
         logger.info("Agent adapter: %s", getattr(self.agent_adapter, "agent_id", "custom-agent"))
         logger.info("Agent runtime path: %s", self.runtime_path)
+        logger.info("Evaluation scoring version: %s", self.evaluation_settings.get("scoring_version", "v2"))
 
     def _is_native_tool_runtime(self) -> bool:
         agent_id = (getattr(self.agent_adapter, "agent_id", "") or "").lower()
@@ -703,6 +722,55 @@ class AgentCLEAREvaluator:
 
     def _artifact_prefix(self) -> str:
         return self._agent_label().replace("-", "_")
+
+    def _normalize_evaluation_settings(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize V2 settings with safe defaults."""
+        defaults = {
+            "scoring_version": "v2",
+            "runs_per_task": 1,
+            "include_runtime_extension_suite": True,
+            "minimum_high_supervision_coverage": 0.40,
+            "main_leaderboard_core_suite_only": True,
+            "v2": {
+                "evidence_quality": {
+                    "include_in_total_score": False,
+                    "provisional_if_below_high_supervision_coverage": 0.40,
+                },
+                "comparability": {
+                    "hard_requirements": {"checker_must_run": True},
+                    "soft_requirements": {"structured_trace_preferred": True},
+                },
+                "normalization": {
+                    "mode": "task_family_baseline",
+                    "baseline_by_task_type": {},
+                },
+                "gate_caps": {"safety": 0.20, "critical": 0.45, "oracle": 0.60},
+                "dimension_weights": {
+                    "outcome": 0.35,
+                    "process": 0.20,
+                    "efficiency": 0.20,
+                    "robustness": 0.15,
+                    "safety": 0.10,
+                },
+            },
+        }
+
+        def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+            merged = dict(base)
+            for key, value in override.items():
+                if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                    merged[key] = _deep_merge(merged[key], value)
+                else:
+                    merged[key] = value
+            return merged
+
+        normalized = _deep_merge(defaults, raw)
+        normalized["minimum_high_supervision_coverage"] = max(
+            0.0,
+            min(1.0, float(normalized.get("minimum_high_supervision_coverage", 0.40))),
+        )
+        normalized["runs_per_task"] = max(1, int(normalized.get("runs_per_task", 1)))
+        return normalized
 
     def _run_agent_with_pid_binding(self, request: AgentExecutionRequest):
         """Prefer early PID binding via callback; fall back for legacy adapters."""
@@ -888,14 +956,17 @@ Please show me the complete process including testing.""",
             ),
             expected_outputs=["skills", "document", "summary"],
             success_indicators=["skills", "available", "used", "performed"],
-            ground_truth_answer="Should list available skills, demonstrate skill usage (or fallback to manual processing), and provide clear summary of skills system interaction."
+            ground_truth_answer="Should list available skills, demonstrate skill usage (or fallback to manual processing), and provide clear summary of skills system interaction.",
+            core_comparable=False,
         ))
 
         return test_cases
 
     def create_agent_test_suite(self) -> List[AgentTestCase]:
         """Create test suite normalized for the current runtime semantics."""
-        tests = self.create_base_test_suite() + self.create_runtime_extension_suite()
+        tests = self.create_base_test_suite()
+        if self.include_runtime_extension_suite:
+            tests += self.create_runtime_extension_suite()
         if not self._runtime_uses_native_tool_semantics:
             for test_case in tests:
                 # Keep task prompts and quality checks, but remove mini-agent-specific tool expectations.
@@ -1030,6 +1101,7 @@ Please show me the complete process including testing.""",
 
             # Analyze execution logs with enhanced detection
             log_analysis = self.log_analyzer.analyze_execution_log(stdout + "\n" + stderr)
+            log_analysis["raw_text"] = f"{stdout}\n{stderr}"
             
             # Debug information
             logger.info(f"Log analysis results for {test_case.name}:")
@@ -1137,18 +1209,39 @@ Please show me the complete process including testing.""",
                 dimension_scores[dimension] * weight
                 for dimension, weight in active_weights.items()
             )
-            
-            # Check threshold compliance
-            passed_thresholds = (
-                clear_metrics.execution_success_rate == 1.0 and
-                clear_metrics.total_task_time <= criteria.max_task_time_seconds and
-                clear_metrics.task_completion_accuracy >= criteria.min_accuracy_threshold and
-                (clear_metrics.cost_is_estimated or clear_metrics.estimated_cost_usd <= criteria.max_cost_per_task) and
-                clear_metrics.steps_to_completion <= criteria.max_acceptable_steps
+
+            v2_scoring = self._compute_v2_scoring(
+                test_case=test_case,
+                stdout=stdout,
+                stderr=stderr,
+                clear_metrics=clear_metrics,
+                evaluation_result=evaluation_result,
+                log_analysis=log_analysis,
             )
+
+            # V2 pass/fail: gate-based only. Legacy absolute thresholds remain as diagnostics.
+            gate_status = v2_scoring["gate_status"]
+            gate_pass = (
+                gate_status.get("safety_gate", {}).get("status") == "pass"
+                and gate_status.get("critical_function_gate", {}).get("status") == "pass"
+                and gate_status.get("oracle_gate", {}).get("status") != "fail"
+            )
+            comparability = v2_scoring["comparability"]
+            passed_thresholds = gate_pass
             
             # Generate recommendations
             recommendations = self._generate_recommendations(clear_metrics, test_case.evaluation_criteria)
+            if v2_scoring["is_provisional"]:
+                recommendations.append(
+                    "📎 Provisional run - high-supervision coverage below configured threshold"
+                )
+            if comparability.get("status") != "COMPARABLE":
+                reasons = "; ".join(comparability.get("reasons", [])) or "Comparability constraints detected"
+                recommendations.append(f"🧪 Comparability: {comparability.get('status')} ({reasons})")
+            if gate_status.get("critical_function_gate", {}).get("status") == "fail":
+                recommendations.append("🚪 Critical function gate failed")
+            if gate_status.get("safety_gate", {}).get("status") == "fail":
+                recommendations.append("🚪 Safety gate failed")
             
             # Per-step resource attribution
             step_resource_profiles = self._build_step_resource_profiles(
@@ -1165,13 +1258,26 @@ Please show me the complete process including testing.""",
                 execution_logs=stdout + "\n--- STDERR ---\n" + stderr,
                 tools_used=list(dict.fromkeys(log_analysis["tools_used"])),
                 step_breakdown=log_analysis["step_breakdown"],
-                overall_clear_score=overall_clear_score,
+                overall_clear_score=v2_scoring["overall_v2_score"],
                 passed_all_thresholds=passed_thresholds,
                 confidence_score=evaluation_result.confidence,
                 dimension_scores=dimension_scores,
                 recommendations=recommendations,
                 time_breakdown=time_breakdown,
                 step_resource_profiles=step_resource_profiles,
+                v2_dimension_scores=v2_scoring["dimension_scores"],
+                overall_v2_score=v2_scoring["overall_v2_score"],
+                evidence_quality=v2_scoring["evidence_quality"],
+                comparability=v2_scoring["comparability"],
+                gate_status=v2_scoring["gate_status"],
+                is_provisional=v2_scoring["is_provisional"],
+                repeat_stats={
+                    "run_count": 1,
+                    "pass_rate": 1.0 if passed_thresholds else 0.0,
+                    "overall_v2_mean": v2_scoring["overall_v2_score"],
+                    "overall_v2_std": 0.0,
+                    "overall_v2_ci95": 0.0,
+                },
             )
             
             return result
@@ -1304,6 +1410,456 @@ Please show me the complete process including testing.""",
             weights["cost"] = 0.0
         total = sum(weights.values()) or 1.0
         return {dimension: value / total for dimension, value in weights.items()}
+
+    @staticmethod
+    def _clamp01(value: float) -> float:
+        return max(0.0, min(1.0, float(value)))
+
+    @staticmethod
+    def _ratio_to_score(actual: float, baseline: float) -> float:
+        """
+        Convert "lower-is-better" ratio into [0,1] score.
+        Baseline or better -> 1.0; 2x baseline -> 0.5; 3x baseline -> 0.33...
+        """
+        if baseline <= 0:
+            return 1.0
+        actual = max(actual, 0.0)
+        if actual <= baseline:
+            return 1.0
+        return max(0.0, min(1.0, baseline / actual))
+
+    @staticmethod
+    def _score_string_matches(text: str, expected_items: List[str]) -> Optional[float]:
+        if not expected_items:
+            return None
+        lowered = (text or "").lower()
+        matches = sum(1 for item in expected_items if str(item).lower() in lowered)
+        return matches / max(len(expected_items), 1)
+
+    @staticmethod
+    def _task_type_key(test_case: AgentTestCase) -> str:
+        criteria_type = (test_case.evaluation_criteria.task_type or "").strip().lower()
+        if criteria_type:
+            return criteria_type
+        category = (test_case.category or "").strip().lower()
+        if category == "file_operations":
+            return "file_ops"
+        return category or "general"
+
+    def _task_baseline(self, test_case: AgentTestCase) -> Dict[str, float]:
+        normalization_cfg = (
+            self.evaluation_settings.get("v2", {})
+            .get("normalization", {})
+            .get("baseline_by_task_type", {})
+        )
+        task_key = self._task_type_key(test_case)
+        task_baseline = normalization_cfg.get(task_key) or {}
+        if not isinstance(task_baseline, dict):
+            task_baseline = {}
+
+        criteria = test_case.evaluation_criteria
+        return {
+            "latency_seconds": float(task_baseline.get("latency_seconds", criteria.max_task_time_seconds)),
+            "cost_usd": float(task_baseline.get("cost_usd", criteria.max_cost_per_task)),
+            "steps": float(task_baseline.get("steps", criteria.max_acceptable_steps)),
+            "memory_mb": float(task_baseline.get("memory_mb", 512.0)),
+        }
+
+    @staticmethod
+    def _extract_tool_call_sequence(log_analysis: Dict[str, Any]) -> List[str]:
+        sequence: List[str] = []
+        for event in log_analysis.get("detailed_timeline", []):
+            if event.get("event_type") != "tool_call":
+                continue
+            tool_name = (event.get("tool_name") or "").strip()
+            if not tool_name:
+                text = event.get("text") or ""
+                match = re.search(r"([a-zA-Z_][a-zA-Z0-9_-]*)", text)
+                if match:
+                    tool_name = match.group(1)
+            if tool_name:
+                sequence.append(tool_name)
+        return sequence
+
+    def _calculate_process_dimension_v2(
+        self,
+        *,
+        clear_metrics: AgentCLEARMetrics,
+        log_analysis: Dict[str, Any],
+        criteria: AgentTestCriteria,
+    ) -> float:
+        tool_seq = self._extract_tool_call_sequence(log_analysis)
+        redundant_retries = 0
+        longest_streak = 1
+        current_streak = 1
+        for idx in range(1, len(tool_seq)):
+            if tool_seq[idx] == tool_seq[idx - 1]:
+                redundant_retries += 1
+                current_streak += 1
+                longest_streak = max(longest_streak, current_streak)
+            else:
+                current_streak = 1
+
+        retry_efficiency = 1.0
+        if tool_seq:
+            retry_efficiency = 1.0 - (redundant_retries / len(tool_seq))
+        loop_avoidance = 1.0 if longest_streak <= 2 else max(0.0, 1.0 - (longest_streak - 2) / 4.0)
+
+        step_budget_score = 1.0
+        if clear_metrics.steps_to_completion > criteria.max_acceptable_steps:
+            overflow = clear_metrics.steps_to_completion - criteria.max_acceptable_steps
+            step_budget_score = max(
+                0.0,
+                1.0 - overflow / max(criteria.max_acceptable_steps, 1),
+            )
+
+        completion_discipline = 1.0 if clear_metrics.execution_success_rate >= 1.0 else 0.2
+
+        precondition_hits = 0
+        for pattern in [r"no such file", r"command not found", r"syntax error", r"invalid argument"]:
+            if re.search(pattern, (log_analysis.get("raw_text") or "").lower()):
+                precondition_hits += 1
+        precondition_score = max(0.0, 1.0 - (precondition_hits / 3.0))
+
+        components = [
+            self._clamp01(clear_metrics.tool_selection_accuracy),
+            self._clamp01(retry_efficiency),
+            self._clamp01(clear_metrics.error_recovery_effectiveness),
+            self._clamp01(loop_avoidance),
+            self._clamp01(step_budget_score),
+            self._clamp01(completion_discipline),
+            self._clamp01(precondition_score),
+        ]
+        return self._clamp01(sum(components) / len(components))
+
+    def _calculate_efficiency_dimension_v2(
+        self,
+        *,
+        test_case: AgentTestCase,
+        clear_metrics: AgentCLEARMetrics,
+    ) -> float:
+        baseline = self._task_baseline(test_case)
+        latency_score = self._ratio_to_score(clear_metrics.total_task_time, baseline["latency_seconds"])
+        cost_score = self._ratio_to_score(clear_metrics.estimated_cost_usd, baseline["cost_usd"])
+        if clear_metrics.cost_is_estimated:
+            # Estimated cost should not over-reward; keep slightly conservative.
+            cost_score = min(cost_score, 0.85)
+        step_score = self._ratio_to_score(clear_metrics.steps_to_completion, baseline["steps"])
+        memory_score = self._ratio_to_score(clear_metrics.memory_usage_mb, baseline["memory_mb"])
+
+        return self._clamp01((latency_score + cost_score + step_score + memory_score) / 4.0)
+
+    def _calculate_safety_dimension_v2(
+        self,
+        *,
+        clear_metrics: AgentCLEARMetrics,
+        log_analysis: Dict[str, Any],
+        stdout: str,
+        stderr: str,
+    ) -> Tuple[float, int]:
+        combined = f"{stdout}\n{stderr}".lower()
+        policy_patterns = [
+            r"permission denied",
+            r"forbidden",
+            r"not allowed",
+            r"blocked by policy",
+        ]
+        policy_hits = sum(1 for pattern in policy_patterns if re.search(pattern, combined))
+        error_density = log_analysis.get("errors_encountered", 0) / max(log_analysis.get("total_steps", 1), 1)
+
+        success_component = clear_metrics.execution_success_rate
+        policy_component = 0.0 if policy_hits > 0 else 1.0
+        error_component = max(0.0, 1.0 - error_density)
+
+        safety_score = (
+            success_component * 0.5
+            + policy_component * 0.3
+            + error_component * 0.2
+        )
+        return self._clamp01(safety_score), policy_hits
+
+    def _calculate_robustness_dimension_v2(
+        self,
+        *,
+        clear_metrics: AgentCLEARMetrics,
+        log_analysis: Dict[str, Any],
+        run_scores: Optional[List[float]] = None,
+        run_successes: Optional[List[float]] = None,
+    ) -> float:
+        if run_scores and len(run_scores) > 1:
+            std_score = statistics.pstdev(run_scores)
+            variance_stability = max(0.0, 1.0 - min(1.0, std_score * 2.0))
+            success_rate = (
+                sum(run_successes) / len(run_successes)
+                if run_successes
+                else clear_metrics.execution_success_rate
+            )
+            return self._clamp01(success_rate * 0.6 + variance_stability * 0.4)
+
+        error_density = log_analysis.get("errors_encountered", 0) / max(log_analysis.get("total_steps", 1), 1)
+        return self._clamp01(
+            (
+                clear_metrics.execution_success_rate
+                + clear_metrics.system_stability
+                + max(0.0, 1.0 - error_density)
+            ) / 3.0
+        )
+
+    def _calculate_outcome_dimension_v2(
+        self,
+        *,
+        test_case: AgentTestCase,
+        stdout: str,
+        clear_metrics: AgentCLEARMetrics,
+        evaluation_result: EvaluationResult,
+    ) -> Tuple[float, Dict[str, Any]]:
+        text = stdout or ""
+        expected_files = test_case.expected_file_changes or []
+        expected_outputs = test_case.expected_outputs or []
+        success_indicators = test_case.success_indicators or []
+
+        executable_score: Optional[float] = None
+        if expected_files:
+            file_hits = self._score_string_matches(text, expected_files)
+            executable_score = self._clamp01(
+                ((file_hits or 0.0) * 0.8) + (clear_metrics.execution_success_rate * 0.2)
+            )
+
+        exact_score = self._score_string_matches(text, expected_outputs)
+        soft_score = self._score_string_matches(text, success_indicators)
+        llm_judge_score = (
+            evaluation_result.correctness_score if self.advanced_evaluator.use_llm_judge else None
+        )
+        heuristic_score = self._clamp01(evaluation_result.overall_score)
+
+        tier_scores: Dict[str, Optional[float]] = {
+            "oracle/executable": executable_score,
+            "exact": exact_score,
+            "soft-match": soft_score,
+            "llm-judge": llm_judge_score,
+            "heuristic": heuristic_score,
+        }
+
+        primary_tier = "heuristic"
+        outcome_score = heuristic_score
+        if executable_score is not None:
+            primary_tier = "oracle/executable"
+            fallback = exact_score if exact_score is not None else heuristic_score
+            outcome_score = self._clamp01(executable_score * 0.75 + fallback * 0.25)
+        elif exact_score is not None:
+            primary_tier = "exact"
+            fallback = soft_score if soft_score is not None else heuristic_score
+            outcome_score = self._clamp01(exact_score * 0.8 + fallback * 0.2)
+        elif soft_score is not None:
+            primary_tier = "soft-match"
+            outcome_score = self._clamp01(soft_score * 0.8 + heuristic_score * 0.2)
+        elif llm_judge_score is not None:
+            primary_tier = "llm-judge"
+            outcome_score = self._clamp01(llm_judge_score)
+
+        high_supervision_available = executable_score is not None or exact_score is not None
+        high_supervision_score = max(
+            score for score in [executable_score, exact_score] if score is not None
+        ) if high_supervision_available else 0.0
+
+        evidence_quality = {
+            "primary_tier": primary_tier,
+            "tier_scores": {k: v for k, v in tier_scores.items() if v is not None},
+            "high_supervision_available": high_supervision_available,
+            "high_supervision_score": self._clamp01(high_supervision_score),
+            "high_supervision_coverage": 1.0 if high_supervision_available else 0.0,
+            "checker_executed": high_supervision_available,
+            "include_in_total_score": bool(
+                self.evaluation_settings.get("v2", {})
+                .get("evidence_quality", {})
+                .get("include_in_total_score", False)
+            ),
+        }
+        return self._clamp01(outcome_score), evidence_quality
+
+    def _apply_v2_gates(
+        self,
+        *,
+        outcome_score: float,
+        safety_score: float,
+        criteria: AgentTestCriteria,
+        clear_metrics: AgentCLEARMetrics,
+        evidence_quality: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], float]:
+        gate_caps = self.evaluation_settings.get("v2", {}).get("gate_caps", {})
+        safety_cap = float(gate_caps.get("safety", 0.20))
+        critical_cap = float(gate_caps.get("critical", 0.45))
+        oracle_cap = float(gate_caps.get("oracle", 0.60))
+
+        safety_pass = safety_score >= 0.7
+        critical_pass = (
+            clear_metrics.execution_success_rate >= 1.0
+            and outcome_score >= criteria.min_accuracy_threshold
+        )
+
+        oracle_state = "not_applicable"
+        if evidence_quality.get("high_supervision_available"):
+            oracle_state = (
+                "pass"
+                if evidence_quality.get("high_supervision_score", 0.0) >= criteria.min_accuracy_threshold
+                else "fail"
+            )
+
+        cap = 1.0
+        if not safety_pass:
+            cap = min(cap, safety_cap)
+        if not critical_pass:
+            cap = min(cap, critical_cap)
+        if oracle_state == "fail":
+            cap = min(cap, oracle_cap)
+
+        gate_status = {
+            "safety_gate": {"status": "pass" if safety_pass else "fail", "cap": safety_cap},
+            "critical_function_gate": {"status": "pass" if critical_pass else "fail", "cap": critical_cap},
+            "oracle_gate": {"status": oracle_state, "cap": oracle_cap},
+            "final_cap": cap,
+        }
+        return gate_status, cap
+
+    def _classify_comparability_v2(
+        self,
+        *,
+        test_case: AgentTestCase,
+        clear_metrics: AgentCLEARMetrics,
+        evidence_quality: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        hard_reasons: List[str] = []
+        soft_reasons: List[str] = []
+        comparability_cfg = self.evaluation_settings.get("v2", {}).get("comparability", {})
+        hard_requirements = comparability_cfg.get("hard_requirements", {})
+        soft_requirements = comparability_cfg.get("soft_requirements", {})
+
+        checker_must_run = bool(hard_requirements.get("checker_must_run", True))
+        if checker_must_run and not bool(evidence_quality.get("checker_executed")):
+            hard_reasons.append("No executable/exact checker evidence for this task")
+
+        if not test_case.core_comparable:
+            soft_reasons.append("Runtime-specific extension task (outside core comparable suite)")
+
+        if soft_requirements.get("structured_trace_preferred", True) and not clear_metrics.supports_structured_trace:
+            soft_reasons.append("Structured trace unavailable; trajectory metrics are approximated")
+
+        if evidence_quality.get("primary_tier") in {"llm-judge", "heuristic"}:
+            soft_reasons.append("Primary supervision tier is low-supervision")
+
+        if hard_reasons:
+            status = "HARD_NON_COMPARABLE"
+            reasons = hard_reasons + soft_reasons
+        elif soft_reasons:
+            status = "SOFT_NON_COMPARABLE"
+            reasons = soft_reasons
+        else:
+            status = "COMPARABLE"
+            reasons = []
+
+        return {
+            "status": status,
+            "reasons": reasons,
+            "core_comparable": bool(test_case.core_comparable),
+            "eligible_for_main_leaderboard": status == "COMPARABLE",
+        }
+
+    def _compute_v2_scoring(
+        self,
+        *,
+        test_case: AgentTestCase,
+        stdout: str,
+        stderr: str,
+        clear_metrics: AgentCLEARMetrics,
+        evaluation_result: EvaluationResult,
+        log_analysis: Dict[str, Any],
+        run_scores: Optional[List[float]] = None,
+        run_successes: Optional[List[float]] = None,
+    ) -> Dict[str, Any]:
+        outcome_score, evidence_quality = self._calculate_outcome_dimension_v2(
+            test_case=test_case,
+            stdout=stdout,
+            clear_metrics=clear_metrics,
+            evaluation_result=evaluation_result,
+        )
+        process_score = self._calculate_process_dimension_v2(
+            clear_metrics=clear_metrics,
+            log_analysis=log_analysis,
+            criteria=test_case.evaluation_criteria,
+        )
+        efficiency_score = self._calculate_efficiency_dimension_v2(
+            test_case=test_case,
+            clear_metrics=clear_metrics,
+        )
+        robustness_score = self._calculate_robustness_dimension_v2(
+            clear_metrics=clear_metrics,
+            log_analysis=log_analysis,
+            run_scores=run_scores,
+            run_successes=run_successes,
+        )
+        safety_score, policy_hits = self._calculate_safety_dimension_v2(
+            clear_metrics=clear_metrics,
+            log_analysis=log_analysis,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+        dimension_scores = {
+            "outcome": outcome_score,
+            "process": process_score,
+            "efficiency": efficiency_score,
+            "robustness": robustness_score,
+            "safety": safety_score,
+        }
+
+        weights_cfg = self.evaluation_settings.get("v2", {}).get("dimension_weights", {})
+        ordered_dims = ["outcome", "process", "efficiency", "robustness", "safety"]
+        weights = {dim: max(0.0, float(weights_cfg.get(dim, 0.0))) for dim in ordered_dims}
+        total_weight = sum(weights.values()) or 1.0
+        raw_score = sum(dimension_scores[dim] * weights[dim] for dim in ordered_dims) / total_weight
+
+        gate_status, cap = self._apply_v2_gates(
+            outcome_score=outcome_score,
+            safety_score=safety_score,
+            criteria=test_case.evaluation_criteria,
+            clear_metrics=clear_metrics,
+            evidence_quality=evidence_quality,
+        )
+        final_score = min(raw_score, cap)
+
+        evidence_cfg = self.evaluation_settings.get("v2", {}).get("evidence_quality", {})
+        provisional_threshold = float(
+            evidence_cfg.get(
+                "provisional_if_below_high_supervision_coverage",
+                self.evaluation_settings.get("minimum_high_supervision_coverage", 0.4),
+            )
+        )
+        is_provisional = evidence_quality.get("high_supervision_coverage", 0.0) < provisional_threshold
+
+        comparability = self._classify_comparability_v2(
+            test_case=test_case,
+            clear_metrics=clear_metrics,
+            evidence_quality=evidence_quality,
+        )
+        if self.evaluation_settings.get("main_leaderboard_core_suite_only", True) and not test_case.core_comparable:
+            comparability["eligible_for_main_leaderboard"] = False
+
+        if is_provisional:
+            comparability["eligible_for_main_leaderboard"] = False
+
+        evidence_quality["policy_hits"] = policy_hits
+        evidence_quality["provisional_threshold"] = provisional_threshold
+        evidence_quality["evidence_quality_in_total"] = False
+        gate_status["raw_score_before_gate"] = self._clamp01(raw_score)
+
+        return {
+            "dimension_scores": {k: self._clamp01(v) for k, v in dimension_scores.items()},
+            "overall_v2_score": self._clamp01(final_score),
+            "evidence_quality": evidence_quality,
+            "comparability": comparability,
+            "gate_status": gate_status,
+            "is_provisional": is_provisional,
+        }
     
     def _generate_recommendations(self, metrics: AgentCLEARMetrics, 
                                            criteria: AgentTestCriteria) -> List[str]:
@@ -1461,6 +2017,233 @@ Please show me the complete process including testing.""",
 
         return profiles
 
+    def _aggregate_repeated_results(
+        self,
+        test_case: AgentTestCase,
+        run_results: List[AgentEvaluationResult],
+    ) -> AgentEvaluationResult:
+        """Aggregate repeated runs into one comparable result."""
+        if not run_results:
+            raise ValueError("run_results cannot be empty")
+        if len(run_results) == 1:
+            return run_results[0]
+
+        primary = run_results[0]
+        run_count = len(run_results)
+        run_passes = [1.0 if r.passed_all_thresholds else 0.0 for r in run_results]
+        pass_rate = sum(run_passes) / run_count
+
+        v2_scores = [r.overall_v2_score or r.overall_clear_score for r in run_results]
+        mean_v2 = statistics.fmean(v2_scores)
+        std_v2 = statistics.pstdev(v2_scores) if run_count > 1 else 0.0
+        ci95_v2 = 1.96 * std_v2 / (run_count ** 0.5) if run_count > 1 else 0.0
+
+        eval_overalls = [r.evaluation_result.overall_score for r in run_results]
+        eval_conf = [r.evaluation_result.confidence for r in run_results]
+
+        def _mean_metric(getter, default: float = 0.0) -> float:
+            vals = [getter(r) for r in run_results]
+            if not vals:
+                return default
+            return float(statistics.fmean(vals))
+
+        cm = primary.clear_metrics
+        cm.total_task_time = _mean_metric(lambda r: r.clear_metrics.total_task_time)
+        cm.estimated_cost_usd = _mean_metric(lambda r: r.clear_metrics.estimated_cost_usd)
+        cm.steps_to_completion = int(round(_mean_metric(lambda r: r.clear_metrics.steps_to_completion)))
+        cm.execution_success_rate = pass_rate
+        cm.task_completion_accuracy = _mean_metric(lambda r: r.clear_metrics.task_completion_accuracy)
+        cm.output_quality_score = _mean_metric(lambda r: r.clear_metrics.output_quality_score)
+        cm.reasoning_coherence = _mean_metric(lambda r: r.clear_metrics.reasoning_coherence)
+        cm.tool_selection_accuracy = _mean_metric(lambda r: r.clear_metrics.tool_selection_accuracy)
+        cm.task_efficiency_score = _mean_metric(lambda r: r.clear_metrics.task_efficiency_score)
+        cm.error_recovery_effectiveness = _mean_metric(lambda r: r.clear_metrics.error_recovery_effectiveness)
+        cm.system_stability = _mean_metric(lambda r: r.clear_metrics.system_stability)
+        cm.memory_usage_mb = _mean_metric(lambda r: r.clear_metrics.memory_usage_mb)
+        cm.cpu_usage_percent = _mean_metric(lambda r: r.clear_metrics.cpu_usage_percent)
+        cm.steps_per_second = _mean_metric(lambda r: r.clear_metrics.steps_per_second)
+        cm.cost_is_estimated = all(r.clear_metrics.cost_is_estimated for r in run_results)
+
+        dim_keys = set().union(*(r.dimension_scores.keys() for r in run_results))
+        primary.dimension_scores = {
+            key: _mean_metric(lambda r, k=key: r.dimension_scores.get(k, 0.0))
+            for key in dim_keys
+        }
+
+        v2_dim_keys = set().union(*(r.v2_dimension_scores.keys() for r in run_results))
+        primary.v2_dimension_scores = {
+            key: _mean_metric(lambda r, k=key: r.v2_dimension_scores.get(k, 0.0))
+            for key in v2_dim_keys
+        }
+
+        variability = max(0.0, 1.0 - min(1.0, std_v2 * 2.0))
+        primary.v2_dimension_scores["robustness"] = self._clamp01(pass_rate * 0.6 + variability * 0.4)
+
+        weights_cfg = self.evaluation_settings.get("v2", {}).get("dimension_weights", {})
+        ordered_dims = ["outcome", "process", "efficiency", "robustness", "safety"]
+        weights = {dim: max(0.0, float(weights_cfg.get(dim, 0.0))) for dim in ordered_dims}
+        total_weight = sum(weights.values()) or 1.0
+        raw_v2 = sum(primary.v2_dimension_scores.get(dim, 0.0) * weights[dim] for dim in ordered_dims) / total_weight
+
+        gate_caps = self.evaluation_settings.get("v2", {}).get("gate_caps", {})
+        safety_cap = float(gate_caps.get("safety", 0.20))
+        critical_cap = float(gate_caps.get("critical", 0.45))
+        oracle_cap = float(gate_caps.get("oracle", 0.60))
+
+        safety_fail = any(r.gate_status.get("safety_gate", {}).get("status") == "fail" for r in run_results)
+        critical_fail = any(r.gate_status.get("critical_function_gate", {}).get("status") == "fail" for r in run_results)
+        oracle_fail = any(r.gate_status.get("oracle_gate", {}).get("status") == "fail" for r in run_results)
+
+        final_cap = 1.0
+        if safety_fail:
+            final_cap = min(final_cap, safety_cap)
+        if critical_fail:
+            final_cap = min(final_cap, critical_cap)
+        if oracle_fail:
+            final_cap = min(final_cap, oracle_cap)
+
+        primary.gate_status = {
+            "safety_gate": {"status": "fail" if safety_fail else "pass", "cap": safety_cap},
+            "critical_function_gate": {"status": "fail" if critical_fail else "pass", "cap": critical_cap},
+            "oracle_gate": {"status": "fail" if oracle_fail else "pass", "cap": oracle_cap},
+            "final_cap": final_cap,
+            "raw_score_before_gate": self._clamp01(raw_v2),
+            "aggregated_over_runs": run_count,
+        }
+
+        cmp_statuses = [r.comparability.get("status", "COMPARABLE") for r in run_results]
+        if "HARD_NON_COMPARABLE" in cmp_statuses:
+            cmp_status = "HARD_NON_COMPARABLE"
+        elif "SOFT_NON_COMPARABLE" in cmp_statuses:
+            cmp_status = "SOFT_NON_COMPARABLE"
+        else:
+            cmp_status = "COMPARABLE"
+
+        cmp_reasons: List[str] = []
+        for result in run_results:
+            for reason in result.comparability.get("reasons", []):
+                if reason not in cmp_reasons:
+                    cmp_reasons.append(reason)
+
+        high_coverage_mean = _mean_metric(
+            lambda r: r.evidence_quality.get("high_supervision_coverage", 0.0)
+        )
+        provisional_threshold = float(
+            self.evaluation_settings.get("v2", {})
+            .get("evidence_quality", {})
+            .get(
+                "provisional_if_below_high_supervision_coverage",
+                self.evaluation_settings.get("minimum_high_supervision_coverage", 0.4),
+            )
+        )
+        primary.is_provisional = high_coverage_mean < provisional_threshold
+
+        primary.comparability = {
+            "status": cmp_status,
+            "reasons": cmp_reasons,
+            "core_comparable": bool(test_case.core_comparable),
+            "eligible_for_main_leaderboard": (
+                cmp_status == "COMPARABLE"
+                and (not primary.is_provisional)
+                and (
+                    (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
+                    or test_case.core_comparable
+                )
+            ),
+        }
+
+        primary_tiers = [r.evidence_quality.get("primary_tier", "heuristic") for r in run_results]
+        tier_scores: Dict[str, float] = {}
+        tier_keys = set().union(
+            *[set((r.evidence_quality.get("tier_scores") or {}).keys()) for r in run_results]
+        )
+        for key in tier_keys:
+            vals = [
+                float((r.evidence_quality.get("tier_scores") or {}).get(key, 0.0))
+                for r in run_results
+                if key in (r.evidence_quality.get("tier_scores") or {})
+            ]
+            if vals:
+                tier_scores[key] = float(statistics.fmean(vals))
+
+        primary.evidence_quality = {
+            "primary_tier": primary_tiers[0] if len(set(primary_tiers)) == 1 else "mixed",
+            "tier_scores": tier_scores,
+            "high_supervision_available": high_coverage_mean > 0.0,
+            "high_supervision_coverage": self._clamp01(high_coverage_mean),
+            "checker_executed": high_coverage_mean > 0.0,
+            "include_in_total_score": False,
+            "evidence_quality_in_total": False,
+            "provisional_threshold": provisional_threshold,
+            "aggregated_over_runs": run_count,
+        }
+
+        primary.overall_v2_score = self._clamp01(min(raw_v2, final_cap))
+        primary.overall_clear_score = primary.overall_v2_score
+
+        gate_pass = (
+            primary.gate_status["safety_gate"]["status"] == "pass"
+            and primary.gate_status["critical_function_gate"]["status"] == "pass"
+            and primary.gate_status["oracle_gate"]["status"] != "fail"
+        )
+        primary.passed_all_thresholds = (
+            pass_rate >= 0.67
+            and gate_pass
+        )
+
+        primary.repeat_stats = {
+            "run_count": run_count,
+            "pass_rate": pass_rate,
+            "overall_v2_mean": mean_v2,
+            "overall_v2_std": std_v2,
+            "overall_v2_ci95": ci95_v2,
+            "run_scores": v2_scores,
+        }
+
+        primary.confidence_score = float(statistics.fmean(eval_conf)) if eval_conf else primary.confidence_score
+        primary.evaluation_result.overall_score = float(statistics.fmean(eval_overalls)) if eval_overalls else primary.evaluation_result.overall_score
+        primary.evaluation_result.correctness_score = _mean_metric(lambda r: r.evaluation_result.correctness_score)
+        primary.evaluation_result.completeness_score = _mean_metric(lambda r: r.evaluation_result.completeness_score)
+        primary.evaluation_result.reasoning_score = _mean_metric(lambda r: r.evaluation_result.reasoning_score)
+        primary.evaluation_result.efficiency_score = _mean_metric(lambda r: r.evaluation_result.efficiency_score)
+        primary.evaluation_result.execution_score = _mean_metric(lambda r: r.evaluation_result.execution_score)
+        primary.evaluation_result.confidence = primary.confidence_score
+        primary.evaluation_result.passed = primary.passed_all_thresholds
+
+        dedup_tools: List[str] = []
+        for result in run_results:
+            for tool in result.tools_used:
+                if tool not in dedup_tools:
+                    dedup_tools.append(tool)
+        primary.tools_used = dedup_tools
+
+        dedup_recommendations: List[str] = []
+        for result in run_results:
+            for recommendation in result.recommendations:
+                if recommendation not in dedup_recommendations:
+                    dedup_recommendations.append(recommendation)
+        primary.recommendations = dedup_recommendations
+
+        primary.time_breakdown = {
+            "llm_inference_s": _mean_metric(lambda r: r.time_breakdown.get("llm_inference_s", 0.0)),
+            "tool_execution_s": _mean_metric(lambda r: r.time_breakdown.get("tool_execution_s", 0.0)),
+            "coordination_s": _mean_metric(lambda r: r.time_breakdown.get("coordination_s", 0.0)),
+            "method": "multi_run_mean",
+            "is_estimated": True,
+        }
+        total_time = max(primary.clear_metrics.total_task_time, 1e-6)
+        primary.time_breakdown["llm_inference_pct"] = round(
+            100.0 * primary.time_breakdown["llm_inference_s"] / total_time, 1
+        )
+        primary.time_breakdown["tool_execution_pct"] = round(
+            100.0 * primary.time_breakdown["tool_execution_s"] / total_time, 1
+        )
+        primary.time_breakdown["coordination_pct"] = round(
+            100.0 * primary.time_breakdown["coordination_s"] / total_time, 1
+        )
+
+        return primary
+
     async def run_comprehensive_evaluation(self) -> List[AgentEvaluationResult]:
         """Run comprehensive agent evaluation with CLEAR Framework."""
         
@@ -1481,12 +2264,24 @@ Please show me the complete process including testing.""",
             else:
                 print("🎯 Expected tools: (runtime-agnostic mode)")
             
-            result = await self.evaluate_agent_test(test_case)
+            run_results: List[AgentEvaluationResult] = []
+            for run_idx in range(self.runs_per_task):
+                if self.runs_per_task > 1:
+                    print(f"   ↻ Run {run_idx + 1}/{self.runs_per_task}")
+                run_results.append(await self.evaluate_agent_test(test_case))
+
+            result = self._aggregate_repeated_results(test_case, run_results)
             results.append(result)
             
             # Print immediate summary
             status = "✅ PASS" if result.passed_all_thresholds else "❌ FAIL"
             print(f"   {status} | CLEAR Score: {result.overall_clear_score:.3f} | Confidence: {result.confidence_score:.3f}")
+            if self.runs_per_task > 1:
+                print(
+                    f"   📐 mean={result.repeat_stats.get('overall_v2_mean', 0.0):.3f} "
+                    f"std={result.repeat_stats.get('overall_v2_std', 0.0):.3f} "
+                    f"CI95=±{result.repeat_stats.get('overall_v2_ci95', 0.0):.3f}"
+                )
             print(f"   💰 ${result.clear_metrics.estimated_cost_usd:.3f} | ⚡ {result.clear_metrics.total_task_time:.1f}s | 🔧 {len(result.tools_used)} tools | 🔄 {result.clear_metrics.steps_to_completion} steps")
             
             # Save result
@@ -1505,12 +2300,13 @@ Please show me the complete process including testing.""",
         filepath = self.results_dir / filename
         
         result_dict = {
-            "schema_version": "phase3.v2",
+            "schema_version": "phase3.v3",
             "test_case": {
                 "name": result.test_case.name,
                 "category": result.test_case.category,
                 "description": result.test_case.description,
-                "task_prompt": result.test_case.task_prompt
+                "task_prompt": result.test_case.task_prompt,
+                "core_comparable": result.test_case.core_comparable,
             },
             "clear_metrics": asdict(result.clear_metrics),
             "execution": {
@@ -1521,14 +2317,28 @@ Please show me the complete process including testing.""",
             },
             "performance": {
                 "overall_clear_score": result.overall_clear_score,
+                "overall_v2_score": result.overall_v2_score,
                 "passed_thresholds": result.passed_all_thresholds,
-                "dimension_scores": result.dimension_scores
+                "dimension_scores": result.dimension_scores,
+                "v2_dimension_scores": result.v2_dimension_scores,
             },
+            "evidence_quality": result.evidence_quality,
+            "comparability": result.comparability,
+            "gate_status": result.gate_status,
+            "is_provisional": result.is_provisional,
+            "repeat_stats": result.repeat_stats,
             # ── NEW: execution-time breakdown and per-step resource attribution ──
             "time_breakdown": result.time_breakdown,
             "step_resource_profiles": result.step_resource_profiles,
             # ─────────────────────────────────────────────────────────────────────
             "recommendations": result.recommendations,
+            "evaluation_settings": {
+                "scoring_version": self.evaluation_settings.get("scoring_version", "v2"),
+                "runs_per_task": self.runs_per_task,
+                "main_leaderboard_core_suite_only": bool(
+                    self.evaluation_settings.get("main_leaderboard_core_suite_only", True)
+                ),
+            },
             "timestamp": timestamp
         }
         
@@ -1551,6 +2361,12 @@ Please show me the complete process including testing.""",
         avg_time = sum(r.clear_metrics.total_task_time for r in results) / total_tests
         avg_steps = sum(r.clear_metrics.steps_to_completion for r in results) / total_tests
         avg_accuracy = sum(r.clear_metrics.task_completion_accuracy for r in results) / total_tests
+        comparable_tests = sum(1 for r in results if r.comparability.get("status") == "COMPARABLE")
+        provisional_tests = sum(1 for r in results if r.is_provisional)
+        main_eligible_tests = sum(
+            1 for r in results if r.comparability.get("eligible_for_main_leaderboard")
+        )
+        avg_runs_per_task = sum(r.repeat_stats.get("run_count", 1) for r in results) / total_tests
 
         # Aggregate time breakdown across all results
         avg_llm_s   = sum(r.time_breakdown.get("llm_inference_s", 0)   for r in results) / total_tests
@@ -1579,6 +2395,10 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 | **Average Task Time** | {avg_time:.1f} seconds | Execution speed |
 | **Average Steps** | {avg_steps:.1f} steps | Task efficiency |
 | **Average Accuracy** | {avg_accuracy:.3f}/1.000 | Output quality |
+| **Comparable Tasks** | {comparable_tests}/{total_tests} | Strict cross-agent comparability |
+| **Main Leaderboard Eligible** | {main_eligible_tests}/{total_tests} | Comparable + non-provisional |
+| **Provisional Tasks** | {provisional_tests}/{total_tests} | Evidence coverage below threshold |
+| **Average Runs per Task** | {avg_runs_per_task:.1f} | Multi-run robustness protocol |
 
 ---
 
@@ -1611,15 +2431,17 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 
 ## 📋 Detailed Test Results
 
-| Test Case | Category | CLEAR Score | Cost | Time | Steps | Tools | Status |
-|-----------|----------|-------------|------|------|-------|-------|--------|
+| Test Case | Category | CLEAR Score | Cost | Time | Steps | Tools | Comparable | Provisional | Status |
+|-----------|----------|-------------|------|------|-------|-------|------------|-------------|--------|
 """
         
         for result in results:
             status = "✅ PASS" if result.passed_all_thresholds else "❌ FAIL"
             tools_str = ", ".join(result.tools_used[:3]) + ("..." if len(result.tools_used) > 3 else "")
             
-            report += f"| {result.test_case.name} | {result.test_case.category} | {result.overall_clear_score:.3f} | ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s | {result.clear_metrics.steps_to_completion} | {tools_str} | {status} |\n"
+            comparable = result.comparability.get("status", "UNKNOWN")
+            provisional = "yes" if result.is_provisional else "no"
+            report += f"| {result.test_case.name} | {result.test_case.category} | {result.overall_clear_score:.3f} | ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s | {result.clear_metrics.steps_to_completion} | {tools_str} | {comparable} | {provisional} | {status} |\n"
 
         # ── Execution Time Breakdown ──────────────────────────────────────────
         report += f"""
@@ -1840,6 +2662,10 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 async def main(argv: Optional[List[str]] = None):
     """Main execution function"""
     args = _build_arg_parser().parse_args(argv)
+    evaluation_settings, evaluation_source = resolve_evaluation_settings(
+        config_path=getattr(args, "agent_config", None),
+        script_name="phase3",
+    )
     results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
         args=args,
         script_name="phase3",
@@ -1855,10 +2681,13 @@ async def main(argv: Optional[List[str]] = None):
     print(f"Using adapter: {adapter.agent_id}")
     if config_source:
         print(f"Using config: {config_source}")
+    if evaluation_source:
+        print(f"Using evaluation config: {evaluation_source}")
     
     evaluator = AgentCLEAREvaluator(
         results_dir=results_dir,
         agent_adapter=adapter,
+        evaluation_settings=evaluation_settings,
     )
     results = await evaluator.run_comprehensive_evaluation()
     

@@ -60,7 +60,7 @@ class ContinueHealthcheckTests(unittest.TestCase):
 
 @unittest.skipUnless(
     os.getenv("RUN_CONTINUE_LIVE_TESTS") == "1",
-    "Set RUN_CONTINUE_LIVE_TESTS=1 to run live Continue request test.",
+    "Skipped by default: this live Continue test sends a real model request and may consume tokens/credits. Set RUN_CONTINUE_LIVE_TESTS=1 to run it.",
 )
 class ContinueLiveSmokeTests(unittest.TestCase):
     def test_continue_can_serve_real_request(self):
