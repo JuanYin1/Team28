@@ -1,0 +1,239 @@
+{
+  "schema_version": "phase3.v3",
+  "test_case": {
+    "name": "data_analysis_task",
+    "category": "analysis",
+    "description": "Analyze data and generate insights with multiple steps",
+    "task_prompt": "Please help me analyze some sample data:\n\n1. Create a CSV file called 'sales_data.csv' with this data:\n   - Headers: Month, Sales, Profit\n   - Data rows:\n     January,10000,2000\n     February,12000,2400\n     March,9000,1800\n     April,15000,3000\n     May,11000,2200\n\n2. Write a Python script that:\n   - Reads the CSV file\n   - Calculates total sales and profit\n   - Finds the month with highest sales\n   - Calculates average monthly profit\n   - Saves results to 'analysis_results.txt'\n\n3. Run the script and show me the analysis results",
+    "core_comparable": true
+  },
+  "clear_metrics": {
+    "llm_api_calls": 10,
+    "total_tokens_used": 994,
+    "tool_executions": 3,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.011263333333333334,
+    "cost_is_estimated": true,
+    "context_window_usage": 0.0,
+    "total_task_time": 27.363909641901653,
+    "agent_thinking_time": 22.42,
+    "tool_execution_time": 3.32,
+    "llm_response_time": 22.42,
+    "steps_to_completion": 5,
+    "supports_structured_trace": true,
+    "trace_signal_quality": 1.0,
+    "time_breakdown_is_estimated": true,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 0.8888888888888888,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 56.3515625,
+    "cpu_usage_percent": 0.12333054785884974,
+    "steps_per_second": 0.1860709575573276,
+    "task_completion_accuracy": 0.6,
+    "output_quality_score": 0.7340277777777776,
+    "reasoning_coherence": 0.5916666666666667,
+    "tool_usage_correctness": 1.0,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 0.0,
+    "error_recovery_effectiveness": 1.0,
+    "response_consistency": 0.0,
+    "response_consistency_measured": false,
+    "system_stability": 1.0
+  },
+  "execution": {
+    "tools_used": [
+      "write_file",
+      "bash",
+      "read_file"
+    ],
+    "steps_taken": 5,
+    "success": 0.0,
+    "output_length": 6874
+  },
+  "performance": {
+    "overall_clear_score": 0.8637866488016357,
+    "overall_v2_score": 0.8637866488016357,
+    "passed_thresholds": false,
+    "dimension_scores": {
+      "cost": 1.0,
+      "reliability": 1.0,
+      "assurance": 0.7203124999999999,
+      "efficiency": 0.9581343315972223,
+      "latency": 0.7719674196508196
+    },
+    "v2_dimension_scores": {
+      "process": 0.9841269841269842,
+      "outcome": 0.9,
+      "safety": 1.0,
+      "efficiency": 0.9625,
+      "robustness": 0.3964083465082588
+    }
+  },
+  "evidence_quality": {
+    "primary_tier": "oracle/executable",
+    "tier_scores": {
+      "heuristic": 0.7340277777777776,
+      "oracle/executable": 1.0,
+      "soft-match": 0.6,
+      "exact": 0.6
+    },
+    "high_supervision_available": true,
+    "high_supervision_coverage": 1.0,
+    "checker_executed": true,
+    "include_in_total_score": false,
+    "evidence_quality_in_total": false,
+    "provisional_threshold": 0.4,
+    "aggregated_over_runs": 3
+  },
+  "comparability": {
+    "status": "COMPARABLE",
+    "reasons": [],
+    "core_comparable": true,
+    "eligible_for_main_leaderboard": true
+  },
+  "gate_status": {
+    "safety_gate": {
+      "status": "pass",
+      "cap": 0.2
+    },
+    "critical_function_gate": {
+      "status": "pass",
+      "cap": 0.45
+    },
+    "oracle_gate": {
+      "status": "pass",
+      "cap": 0.6
+    },
+    "final_cap": 1.0,
+    "raw_score_before_gate": 0.8637866488016357,
+    "aggregated_over_runs": 3
+  },
+  "is_provisional": false,
+  "repeat_stats": {
+    "run_count": 3,
+    "pass_rate": 0.0,
+    "overall_v2_mean": 0.9543253968253969,
+    "overall_v2_std": 0.004489566864676529,
+    "overall_v2_ci95": 0.005080423170217003,
+    "run_scores": [
+      0.9575,
+      0.9575,
+      0.9479761904761904
+    ]
+  },
+  "time_breakdown": {
+    "llm_inference_s": 23.336666666666662,
+    "tool_execution_s": 3.1799999999999997,
+    "coordination_s": 0.8466666666666667,
+    "method": "multi_run_mean",
+    "is_estimated": true,
+    "llm_inference_pct": 85.3,
+    "tool_execution_pct": 11.6,
+    "coordination_pct": 3.1
+  },
+  "step_resource_profiles": [
+    {
+      "step": 1,
+      "event_type": "thinking",
+      "time_offset_s": 5.24,
+      "cpu_percent": 0.0,
+      "memory_mb": 18.4
+    },
+    {
+      "step": 1,
+      "event_type": "assistant_response",
+      "time_offset_s": 7.11,
+      "cpu_percent": 0.0,
+      "memory_mb": 18.4
+    },
+    {
+      "step": 1,
+      "event_type": "tool_result",
+      "time_offset_s": 9.36,
+      "cpu_percent": 0.0,
+      "memory_mb": 18.4
+    },
+    {
+      "step": 2,
+      "event_type": "thinking",
+      "time_offset_s": 10.85,
+      "cpu_percent": 0.0,
+      "memory_mb": 18.4
+    },
+    {
+      "step": 2,
+      "event_type": "assistant_response",
+      "time_offset_s": 11.41,
+      "cpu_percent": 0.0,
+      "memory_mb": 18.4
+    },
+    {
+      "step": 2,
+      "event_type": "tool_result",
+      "time_offset_s": 13.29,
+      "cpu_percent": 0.0,
+      "memory_mb": 17.7
+    },
+    {
+      "step": 3,
+      "event_type": "thinking",
+      "time_offset_s": 14.78,
+      "cpu_percent": 0.0,
+      "memory_mb": 17.7
+    },
+    {
+      "step": 3,
+      "event_type": "assistant_response",
+      "time_offset_s": 15.34,
+      "cpu_percent": 0.0,
+      "memory_mb": 17.7
+    },
+    {
+      "step": 3,
+      "event_type": "tool_result",
+      "time_offset_s": 17.03,
+      "cpu_percent": 0.0,
+      "memory_mb": 16.5
+    },
+    {
+      "step": 4,
+      "event_type": "thinking",
+      "time_offset_s": 20.96,
+      "cpu_percent": 0.0,
+      "memory_mb": 16.5
+    },
+    {
+      "step": 4,
+      "event_type": "tool_result",
+      "time_offset_s": 22.45,
+      "cpu_percent": 0.0,
+      "memory_mb": 16.5
+    },
+    {
+      "step": 5,
+      "event_type": "thinking",
+      "time_offset_s": 26.01,
+      "cpu_percent": 0.0,
+      "memory_mb": 15.2
+    },
+    {
+      "step": 5,
+      "event_type": "assistant_response",
+      "time_offset_s": 26.57,
+      "cpu_percent": 0.0,
+      "memory_mb": 15.2
+    }
+  ],
+  "recommendations": [
+    "\u2705 Improve task completion - accuracy 0.60 below 0.7",
+    "\ud83d\udcb2 Cost is estimated (not provider-reported) and excluded from strict scoring",
+    "\ud83d\udd27 Improve tool selection - accuracy 0.67",
+    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking"
+  ],
+  "evaluation_settings": {
+    "scoring_version": "v2",
+    "runs_per_task": 3,
+    "main_leaderboard_core_suite_only": true
+  },
+  "timestamp": 1773019331
+}

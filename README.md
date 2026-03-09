@@ -18,13 +18,19 @@ cd agentic_sys
 ## 2) Continue setup (team API key mode)
 
 If you use Continue with team credits, follow:
-- `docs/continue_setup.md`
+- `agentic_sys/docs/continue_setup.md`
 
 That guide includes:
 - CLI install
 - `CONTINUE_API_KEY` setup
 - health checks
 - phase1/2/3 commands
+
+## 2b) V2 evaluation workflow (config-driven)
+
+For the full end-to-end V2 scoring workflow (config fields, core suite policy,
+comparability/provisional rules, multi-run aggregation, outputs):
+- `docs/evaluation_workflow_v2.md`
 
 ## 3) Run pipeline
 

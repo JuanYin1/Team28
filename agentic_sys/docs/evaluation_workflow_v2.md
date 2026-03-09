@@ -80,6 +80,20 @@ python clear_evaluation_system.py --agent continue
 
 输出字段：`repeat_stats`。
 
+## 4.1 分数解释风险（必须知晓）
+
+在当前实现里，聚合后的 `performance.overall_v2_score` 可能高于（或低于）`repeat_stats.overall_v2_mean`，两者不保证相等。
+
+原因：
+- `overall_v2_mean` 是各次 run 的 `overall_v2_score` 直接均值。
+- 聚合阶段会基于 `pass_rate/std` 重新计算 `robustness` 维度，再用五维权重重新合成最终 `overall_v2_score`。
+- 因为“先均值后重算维度”与“每次先算总分再均值”不是同一个运算，所以可能出现数值差异。
+
+解读建议：
+- 报告稳定性时优先看 `repeat_stats.overall_v2_mean/std/ci95`。
+- 排名与门控判断看 `performance.overall_v2_score`（聚合后的主分）。
+- 对外发布时应同时展示这两个值，避免“均值与总分不一致”带来的误读。
+
 ## 5. 主榜资格判定
 
 主榜资格由以下条件共同决定：

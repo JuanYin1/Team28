@@ -1,0 +1,203 @@
+{
+  "schema_version": "phase3.v2",
+  "test_case": {
+    "name": "error_handling_test",
+    "category": "reasoning",
+    "description": "Test agent's ability to handle errors and adapt",
+    "task_prompt": "I need you to help me with a task that might have some issues:\n\n1. Try to read a file called 'nonexistent.txt' \n2. When that fails (as it should), create the file with some sample content\n3. Read the file you just created to confirm it works\n4. Try to run a Python command that has a syntax error: 'python -c \"print(hello world\"'\n5. Fix the syntax error and run the corrected command\n6. Summarize what went wrong and how you fixed the issues"
+  },
+  "clear_metrics": {
+    "llm_api_calls": 12,
+    "total_tokens_used": 1141,
+    "tool_executions": 3,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.014282,
+    "cost_is_estimated": true,
+    "context_window_usage": 0.0,
+    "total_task_time": 42.90331792831421,
+    "agent_thinking_time": 37.67,
+    "tool_execution_time": 3.14,
+    "llm_response_time": 37.67,
+    "steps_to_completion": 6,
+    "supports_structured_trace": true,
+    "trace_signal_quality": 1.0,
+    "time_breakdown_is_estimated": true,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 1.0,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 135.24609375,
+    "cpu_usage_percent": 0.12093023255813952,
+    "steps_per_second": 0.13984932377549936,
+    "task_completion_accuracy": 1.0,
+    "output_quality_score": 0.8083333333333331,
+    "reasoning_coherence": 0.30000000000000004,
+    "tool_usage_correctness": 1.0,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 1.0,
+    "error_recovery_effectiveness": 0.6,
+    "response_consistency": 0.0,
+    "response_consistency_measured": false,
+    "system_stability": 0.6666666666666667
+  },
+  "execution": {
+    "tools_used": [
+      "read_file",
+      "write_file",
+      "bash"
+    ],
+    "steps_taken": 6,
+    "success": 1.0,
+    "output_length": 7146
+  },
+  "performance": {
+    "overall_clear_score": 0.7832132085046651,
+    "passed_thresholds": true,
+    "dimension_scores": {
+      "cost": 1.0,
+      "latency": 0.6424723505973816,
+      "efficiency": 0.9661884765625,
+      "assurance": 0.7770833333333333,
+      "reliability": 0.7555555555555555
+    }
+  },
+  "time_breakdown": {
+    "llm_inference_s": 37.67,
+    "tool_execution_s": 3.14,
+    "coordination_s": 2.09,
+    "llm_inference_pct": 87.8,
+    "tool_execution_pct": 7.3,
+    "coordination_pct": 4.9,
+    "method": "timeline_weighted",
+    "is_estimated": true,
+    "llm_events": 12,
+    "tool_events": 3,
+    "coord_events": 2
+  },
+  "step_resource_profiles": [
+    {
+      "step": 1,
+      "event_type": "thinking",
+      "time_offset_s": 7.42,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 1,
+      "event_type": "assistant_response",
+      "time_offset_s": 10.59,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 1,
+      "event_type": "error",
+      "time_offset_s": 13.51,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 2,
+      "event_type": "thinking",
+      "time_offset_s": 15.63,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 2,
+      "event_type": "assistant_response",
+      "time_offset_s": 16.42,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 2,
+      "event_type": "tool_result",
+      "time_offset_s": 19.6,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.0
+    },
+    {
+      "step": 3,
+      "event_type": "thinking",
+      "time_offset_s": 21.72,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.1
+    },
+    {
+      "step": 3,
+      "event_type": "assistant_response",
+      "time_offset_s": 22.51,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.1
+    },
+    {
+      "step": 3,
+      "event_type": "tool_result",
+      "time_offset_s": 24.89,
+      "cpu_percent": 0.0,
+      "memory_mb": 135.2
+    },
+    {
+      "step": 4,
+      "event_type": "thinking",
+      "time_offset_s": 27.54,
+      "cpu_percent": 0.0,
+      "memory_mb": 134.4
+    },
+    {
+      "step": 4,
+      "event_type": "assistant_response",
+      "time_offset_s": 28.34,
+      "cpu_percent": 0.0,
+      "memory_mb": 134.4
+    },
+    {
+      "step": 4,
+      "event_type": "error",
+      "time_offset_s": 31.25,
+      "cpu_percent": 0.0,
+      "memory_mb": 134.4
+    },
+    {
+      "step": 5,
+      "event_type": "thinking",
+      "time_offset_s": 34.43,
+      "cpu_percent": 0.0,
+      "memory_mb": 92.6
+    },
+    {
+      "step": 5,
+      "event_type": "assistant_response",
+      "time_offset_s": 36.28,
+      "cpu_percent": 0.0,
+      "memory_mb": 88.5
+    },
+    {
+      "step": 5,
+      "event_type": "tool_result",
+      "time_offset_s": 39.73,
+      "cpu_percent": 0.0,
+      "memory_mb": 88.4
+    },
+    {
+      "step": 6,
+      "event_type": "thinking",
+      "time_offset_s": 42.11,
+      "cpu_percent": 0.0,
+      "memory_mb": 88.4
+    },
+    {
+      "step": 6,
+      "event_type": "assistant_response",
+      "time_offset_s": 42.9,
+      "cpu_percent": 0.8,
+      "memory_mb": 112.3
+    }
+  ],
+  "recommendations": [
+    "\ud83e\udde0 Enhance reasoning quality - improve step-by-step thinking",
+    "\ud83d\udd04 Improve error recovery - better adaptation to failures",
+    "\ud83d\udcb2 Cost is estimated (not provider-reported) and excluded from strict scoring"
+  ],
+  "timestamp": 1773003577
+}
