@@ -309,7 +309,7 @@ class EnhancedAgentEvaluator:
             }
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(result_data, f, indent=2)
         
         print(f"   📁 Enhanced result saved: {filename}")
@@ -328,7 +328,7 @@ Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}
 
 No tests were executed (likely due to category filters).
 """
-            with open(report_path, 'w') as f:
+            with open(report_path, 'w', encoding='utf-8') as f:
                 f.write(report)
 
             print(f"\n📊 Enhanced analysis complete!")
@@ -518,7 +518,7 @@ This enhanced evaluation combines explicit reasoning assessment with real-time s
 """
         
         # Save comprehensive report
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         
         print(f"\n📊 Enhanced analysis complete!")

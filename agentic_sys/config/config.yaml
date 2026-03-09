@@ -3,7 +3,7 @@ version: 2
 evaluation:
   shared:
     scoring_version: v2
-    runs_per_task: 3
+    runs_per_task: 1
     include_runtime_extension_suite: false
     minimum_high_supervision_coverage: 0.40
     main_leaderboard_core_suite_only: true

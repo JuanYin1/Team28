@@ -389,7 +389,7 @@ Provide reasoning for each recommendation."""),
             }
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(result_dict, f, indent=2)
         
         print(f"   📁 Detailed result saved: {filename}")
@@ -573,7 +573,7 @@ The evaluation framework provides confidence estimates and detailed component an
 """
         
         # Save comprehensive report
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         
         print(f"\n📊 Comprehensive analysis complete!")

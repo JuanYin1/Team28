@@ -516,7 +516,7 @@ class RealTimeSystemMonitor:
             "performance_analysis": asdict(self._analyze_performance())
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2)
         
         logger.info(f"Monitoring data saved to {filepath}")

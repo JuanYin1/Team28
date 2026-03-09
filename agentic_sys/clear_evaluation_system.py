@@ -27,6 +27,7 @@ import traceback
 import tempfile
 import re
 import statistics
+import sys
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any, Tuple
@@ -56,6 +57,15 @@ from agent_runtime.script_config import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Best-effort Windows console UTF-8 setup to avoid UnicodeEncodeError on emoji output.
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 
 def _looks_like_agent_process(process_name: str, cmd_parts: List[str], process_hint: str) -> bool:
@@ -703,6 +713,7 @@ class AgentCLEAREvaluator:
         self.include_runtime_extension_suite = bool(
             self.evaluation_settings.get("include_runtime_extension_suite", True)
         )
+        self._last_execution_metadata: Dict[str, Any] = {}
         
         # Logging setup
         logging.basicConfig(level=logging.INFO)
@@ -996,6 +1007,7 @@ Please show me the complete process including testing.""",
                 stderr = execution.stderr or ""
                 success = execution.success
                 execution_time = execution.execution_time_seconds
+                self._last_execution_metadata = dict(getattr(execution, "metadata", {}) or {})
                 
                 # Check for expected file changes in workspace
                 for expected_file in test_case.expected_file_changes:
@@ -1013,7 +1025,87 @@ Please show me the complete process including testing.""",
                 
         except Exception as e:
             execution_time = time.time() - start_time
+            self._last_execution_metadata = {}
             return "", f"Execution error: {str(e)}", False, execution_time
+
+    def _inject_stream_based_timeline(
+        self,
+        log_analysis: Dict[str, Any],
+        execution_time: float,
+    ) -> None:
+        """
+        Build a coarse timeline from adapter stream timing when native trace is missing.
+
+        This is intended for runtimes like Continue CLI that may only print final text,
+        so parser-level step/tool markers are unavailable.
+        """
+        if log_analysis.get("detailed_timeline"):
+            return
+
+        metadata = self._last_execution_metadata or {}
+        stream_timing = metadata.get("stream_timing")
+        if not isinstance(stream_timing, dict):
+            return
+
+        def _valid_secs(value: Any) -> Optional[float]:
+            if value is None:
+                return None
+            try:
+                sec = float(value)
+            except (TypeError, ValueError):
+                return None
+            if execution_time <= 0:
+                return max(0.0, sec)
+            return max(0.0, min(sec, execution_time))
+
+        first_stdout = _valid_secs(stream_timing.get("first_stdout_s"))
+        last_stdout = _valid_secs(stream_timing.get("last_stdout_s"))
+        first_stderr = _valid_secs(stream_timing.get("first_stderr_s"))
+        last_stderr = _valid_secs(stream_timing.get("last_stderr_s"))
+
+        first_candidates = [v for v in (first_stdout, first_stderr) if v is not None]
+        if not first_candidates:
+            return
+        first_output_s = min(first_candidates)
+
+        last_candidates = [v for v in (last_stdout, last_stderr) if v is not None]
+        if last_candidates:
+            last_output_s = max(last_candidates)
+        else:
+            last_output_s = first_output_s
+
+        timeline = log_analysis.setdefault("detailed_timeline", [])
+        timeline.extend([
+            {
+                "event_type": "coordination",
+                "step": 1,
+                "line": 0,
+                "time_offset_s": 0.0,
+                "text": "synthetic_start",
+            },
+            {
+                "event_type": "thinking",
+                "step": 1,
+                "line": 1,
+                "time_offset_s": round(first_output_s, 3),
+                "text": "synthetic_first_output",
+            },
+            {
+                "event_type": "assistant_response",
+                "step": 1,
+                "line": 2,
+                "time_offset_s": round(last_output_s, 3),
+                "text": "synthetic_last_output",
+            },
+        ])
+
+        log_analysis["total_steps"] = max(1, int(log_analysis.get("total_steps", 0)))
+        log_analysis["assistant_responses"] = max(1, int(log_analysis.get("assistant_responses", 0)))
+        log_analysis["trace_signal_quality"] = max(
+            float(log_analysis.get("trace_signal_quality", 0.5)),
+            0.65,
+        )
+        log_analysis["timeline_source"] = "stream_timing_fallback"
 
     def _bind_monitor_target_pid(self, launcher_pid: int, conda_mode: bool) -> None:
         """
@@ -1102,6 +1194,7 @@ Please show me the complete process including testing.""",
             # Analyze execution logs with enhanced detection
             log_analysis = self.log_analyzer.analyze_execution_log(stdout + "\n" + stderr)
             log_analysis["raw_text"] = f"{stdout}\n{stderr}"
+            self._inject_stream_based_timeline(log_analysis, execution_time)
             
             # Debug information
             logger.info(f"Log analysis results for {test_case.name}:")
@@ -2001,8 +2094,12 @@ Please show me the complete process including testing.""",
         profiles = []
 
         for event in timeline:
-            line_num = event.get("line", 0)
-            time_offset = (line_num / max_line) * execution_time
+            explicit_offset = event.get("time_offset_s")
+            if isinstance(explicit_offset, (int, float)):
+                time_offset = max(0.0, min(float(explicit_offset), execution_time))
+            else:
+                line_num = event.get("line", 0)
+                time_offset = (line_num / max_line) * execution_time
             abs_ts = task_start_time + time_offset
 
             memory_mb, cpu_pct = resource_monitor.get_resource_at(abs_ts)
@@ -2342,7 +2439,7 @@ Please show me the complete process including testing.""",
             "timestamp": timestamp
         }
         
-        with open(filepath, 'w') as f:
+        with open(filepath, 'w', encoding='utf-8') as f:
             json.dump(result_dict, f, indent=2)
         
         print(f"   📁 Result saved: {filename}")
@@ -2588,7 +2685,7 @@ position in the log against wall-clock timestamps captured by the resource monit
 *Evaluation Path: {self.runtime_path}*
 """
         
-        with open(report_path, 'w') as f:
+        with open(report_path, 'w', encoding='utf-8') as f:
             f.write(report)
         
         print(f"\n📊 Agent evaluation complete!")

@@ -4,6 +4,7 @@ import abc
 import os
 import subprocess
 import time
+import threading
 from typing import Callable, Dict, List, Optional
 import shutil
 from pathlib import Path
@@ -441,7 +442,12 @@ class ContinueCnAdapter(AgentAdapter):
             cmd.extend(["--model", model_slug])
         for policy in self.allow_policies:
             cmd.extend(["--allow", policy])
-        cmd.extend(["-p", request.task_prompt])
+        prompt = request.task_prompt
+        # On Windows, `cn.CMD` is a batch wrapper and multiline args can be truncated.
+        # Flattening newlines keeps prompt semantics while avoiding cmd parsing issues.
+        if os.name == "nt" and str(self.executable).lower().endswith(".cmd"):
+            prompt = " ".join(line.strip() for line in prompt.splitlines() if line.strip())
+        cmd.extend(["-p", prompt])
         cmd.extend(self.extra_args)
         return cmd
 
@@ -504,11 +510,58 @@ class ContinueCnAdapter(AgentAdapter):
                 except Exception:
                     pass
 
+            stdout_chunks: List[str] = []
+            stderr_chunks: List[str] = []
+            stream_timing: Dict[str, Optional[float]] = {
+                "first_stdout_s": None,
+                "last_stdout_s": None,
+                "first_stderr_s": None,
+                "last_stderr_s": None,
+            }
+
+            def _read_stream(
+                stream,
+                sink: List[str],
+                first_key: str,
+                last_key: str,
+            ) -> None:
+                if stream is None:
+                    return
+                try:
+                    for chunk in iter(stream.readline, ""):
+                        now_s = max(0.0, time.time() - start)
+                        if stream_timing[first_key] is None:
+                            stream_timing[first_key] = now_s
+                        stream_timing[last_key] = now_s
+                        sink.append(chunk)
+                finally:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+
+            stdout_thread = threading.Thread(
+                target=_read_stream,
+                args=(process.stdout, stdout_chunks, "first_stdout_s", "last_stdout_s"),
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=_read_stream,
+                args=(process.stderr, stderr_chunks, "first_stderr_s", "last_stderr_s"),
+                daemon=True,
+            )
+            stdout_thread.start()
+            stderr_thread.start()
+
             try:
-                stdout, stderr = process.communicate(timeout=request.timeout_seconds)
+                process.wait(timeout=request.timeout_seconds)
             except subprocess.TimeoutExpired:
                 process.kill()
-                stdout, stderr = process.communicate()
+                process.wait()
+                stdout_thread.join(timeout=1.0)
+                stderr_thread.join(timeout=1.0)
+                stdout = "".join(stdout_chunks)
+                stderr = "".join(stderr_chunks)
                 elapsed = time.time() - start
                 timeout_msg = f"Task timed out after {request.timeout_seconds} seconds"
                 stderr_with_timeout = f"{stderr}\n{timeout_msg}" if stderr else timeout_msg
@@ -521,8 +574,16 @@ class ContinueCnAdapter(AgentAdapter):
                     return_code=process.returncode,
                     pid=process.pid,
                     timed_out=True,
+                    metadata={
+                        "stream_timing": stream_timing,
+                        "stream_trace_mode": "line_buffered_subprocess",
+                    },
                 )
 
+            stdout_thread.join(timeout=1.0)
+            stderr_thread.join(timeout=1.0)
+            stdout = "".join(stdout_chunks)
+            stderr = "".join(stderr_chunks)
             elapsed = time.time() - start
             return AgentExecutionResult(
                 command=cmd,
@@ -532,6 +593,10 @@ class ContinueCnAdapter(AgentAdapter):
                 execution_time_seconds=elapsed,
                 return_code=process.returncode,
                 pid=process.pid,
+                metadata={
+                    "stream_timing": stream_timing,
+                    "stream_trace_mode": "line_buffered_subprocess",
+                },
             )
 
         except FileNotFoundError as exc:
