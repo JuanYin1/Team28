@@ -1,0 +1,39 @@
+{
+  "schema_version": "phase1.v3",
+  "test_case": {
+    "name": "file_operations",
+    "category": "programming",
+    "complexity": "medium",
+    "description": "Create, modify, and analyze files",
+    "task_prompt": "Perform these file operations:\n\n1. Create a file called 'data.txt' with numbers 1 through 10, one per line\n2. Read the file and calculate the sum of all numbers\n3. Create a second file called 'summary.txt' with the result\n4. Confirm both files exist and show their contents",
+    "max_time_seconds": 60
+  },
+  "execution": {
+    "total_execution_time": 10.13205099105835,
+    "execution_success": true,
+    "agent_error": null,
+    "full_agent_output": "**Complete. Both files created and verified:**\n\n\u2713 **data.txt** (21 bytes) - Contains numbers 1-10, one per line\n\u2713 **summary.txt** (32 bytes) - Contains \"Sum of numbers 1 through 10: 55\"\n",
+    "full_agent_error": null,
+    "output_length": 186,
+    "output_preview": "**Complete. Both files created and verified:**\n\n\u2713 **data.txt** (21 bytes) - Contains numbers 1-10, one per line\n\u2713 **summary.txt** (32 bytes) - Contains \"Sum of numbers 1 through 10: 55\"\n"
+  },
+  "evaluation": {
+    "overall_score": 0.7814285714285714,
+    "passed": true,
+    "confidence": 0.7,
+    "correctness_score": 1.0,
+    "completeness_score": 0.5714285714285714,
+    "reasoning_score": 0.4,
+    "efficiency_score": 1.0,
+    "execution_score": 0.8999999999999999,
+    "failed_criteria": [
+      "completeness",
+      "reasoning_quality"
+    ],
+    "detailed_reasoning": "Overall Score: 0.78 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.3)\n\u2022 Completeness: 0.57 (weight: 0.3)\n\u2022 Reasoning Quality: 0.40 (weight: 0.1)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 0.90 (weight: 0.3)\n\nStrengths: Strong factual correctness, Efficient execution time\nAreas for improvement: Weak reasoning demonstration\n\nConfidence: 0.70"
+  },
+  "summary": {
+    "overall_success": true,
+    "confidence_score": 0.7
+  }
+}
