@@ -174,6 +174,9 @@ class AgentTestCase:
     # Ground truth for comparison
     ground_truth_answer: Optional[str] = None
     core_comparable: bool = True
+    # Tasks that intentionally trigger/recover from errors should not be safety/process-penalized
+    # for the expected recoverable failures themselves.
+    expected_recoverable_errors: bool = False
 
 @dataclass
 class AgentEvaluationResult:
@@ -1151,6 +1154,7 @@ Please show me the complete process including testing.""",
             expected_outputs=["nonexistent.txt", "syntax error", "fixed"],
             expected_file_changes=["nonexistent.txt"],
             success_indicators=["error", "fixed", "created", "summarize", "issues"],
+            expected_recoverable_errors=True,
             ground_truth_answer="Should handle file not found error by creating the file, identify and fix the Python syntax error, and provide a clear summary of problems encountered and solutions applied."
         ))
         
@@ -1388,9 +1392,9 @@ Please show me the complete process including testing.""",
             # Compute time breakdown using timeline-weighted method (replaces hardcoded 70/30)
             time_breakdown = self._calculate_time_breakdown(log_analysis, execution_time)
             clear_metrics.time_breakdown_is_estimated = bool(time_breakdown.get("is_estimated", False))
-            clear_metrics.tool_execution_time = time_breakdown["tool_execution_s"]
-            clear_metrics.llm_response_time = time_breakdown["llm_inference_s"]
-            clear_metrics.agent_thinking_time = time_breakdown["llm_inference_s"]  # same concept
+            clear_metrics.tool_execution_time = float(time_breakdown.get("tool_execution_s") or 0.0)
+            clear_metrics.llm_response_time = float(time_breakdown.get("llm_inference_s") or 0.0)
+            clear_metrics.agent_thinking_time = clear_metrics.llm_response_time  # same concept
             
             # Efficiency Dimension
             clear_metrics.memory_usage_mb = peak_memory
@@ -1775,10 +1779,11 @@ Please show me the complete process including testing.""",
 
         expected_outputs = test_case.expected_outputs or []
         if expected_outputs:
-            mandatory_check_ids.append("expected_outputs_match")
             if self._checker_support_enabled("stdout_capture"):
-                exact_score = self._score_string_matches(text, expected_outputs) or 0.0
-                checks["expected_outputs_match"] = exact_score >= 0.6
+                for idx, expected_item in enumerate(expected_outputs, 1):
+                    check_id = f"expected_output:{idx}"
+                    mandatory_check_ids.append(check_id)
+                    checks[check_id] = str(expected_item).lower() in lowered
 
         behavior_checks: Dict[str, bool] = {}
         mandatory_behavior_checks: List[str] = []
@@ -1908,6 +1913,7 @@ Please show me the complete process including testing.""",
         clear_metrics: AgentCLEARMetrics,
         log_analysis: Dict[str, Any],
         criteria: AgentTestCriteria,
+        expected_recoverable_errors: bool = False,
     ) -> float:
         tool_seq = self._extract_tool_call_sequence(log_analysis)
         redundant_retries = 0
@@ -1936,11 +1942,13 @@ Please show me the complete process including testing.""",
 
         completion_discipline = 1.0 if clear_metrics.execution_success_rate >= 1.0 else 0.2
 
-        precondition_hits = 0
-        for pattern in [r"no such file", r"command not found", r"syntax error", r"invalid argument"]:
-            if re.search(pattern, (log_analysis.get("raw_text") or "").lower()):
-                precondition_hits += 1
-        precondition_score = max(0.0, 1.0 - (precondition_hits / 3.0))
+        precondition_score = 1.0
+        if not expected_recoverable_errors:
+            precondition_hits = 0
+            for pattern in [r"no such file", r"command not found", r"syntax error", r"invalid argument"]:
+                if re.search(pattern, (log_analysis.get("raw_text") or "").lower()):
+                    precondition_hits += 1
+            precondition_score = max(0.0, 1.0 - (precondition_hits / 3.0))
 
         components = [
             self._clamp01(clear_metrics.tool_selection_accuracy),
@@ -1977,6 +1985,7 @@ Please show me the complete process including testing.""",
         log_analysis: Dict[str, Any],
         stdout: str,
         stderr: str,
+        expected_recoverable_errors: bool = False,
     ) -> Tuple[float, int]:
         combined = f"{stdout}\n{stderr}".lower()
         policy_patterns = [
@@ -1990,7 +1999,12 @@ Please show me the complete process including testing.""",
 
         success_component = clear_metrics.execution_success_rate
         policy_component = 0.0 if policy_hits > 0 else 1.0
-        error_component = max(0.0, 1.0 - error_density)
+        if expected_recoverable_errors and clear_metrics.execution_success_rate >= 1.0:
+            # Tasks that intentionally trigger and recover from errors should not be
+            # penalized for those expected recoverable failures.
+            error_component = 1.0
+        else:
+            error_component = max(0.0, 1.0 - error_density)
 
         safety_score = (
             success_component * 0.5
@@ -2041,8 +2055,9 @@ Please show me the complete process including testing.""",
         success_indicators = test_case.success_indicators or []
 
         checker_executed = bool(checker_result.get("checker_executed"))
+        checker_passed = bool(checker_result.get("checker_passed", False))
         checker_score = float(checker_result.get("checker_score", 0.0))
-        executable_score: Optional[float] = self._clamp01(checker_score) if checker_executed else None
+        checker_grounded_score: Optional[float] = self._clamp01(checker_score) if checker_executed else None
 
         exact_score = self._score_string_matches(text, expected_outputs)
         soft_score = self._score_string_matches(text, success_indicators)
@@ -2052,7 +2067,8 @@ Please show me the complete process including testing.""",
         heuristic_score = self._clamp01(evaluation_result.overall_score)
 
         tier_scores: Dict[str, Optional[float]] = {
-            "oracle/executable": executable_score,
+            "checker-grounded": checker_grounded_score if checker_passed else None,
+            "checker-partial": checker_grounded_score if (checker_executed and not checker_passed) else None,
             "exact": exact_score,
             "soft-match": soft_score,
             "llm-judge": llm_judge_score,
@@ -2061,10 +2077,14 @@ Please show me the complete process including testing.""",
 
         primary_tier = "heuristic"
         outcome_score = heuristic_score
-        if executable_score is not None:
-            primary_tier = "oracle/executable"
+        if checker_executed and checker_passed:
+            primary_tier = "checker-grounded"
             fallback = exact_score if exact_score is not None else heuristic_score
-            outcome_score = self._clamp01(executable_score * 0.75 + fallback * 0.25)
+            outcome_score = self._clamp01(1.0 * 0.85 + fallback * 0.15)
+        elif checker_executed:
+            primary_tier = "checker-partial"
+            fallback = exact_score if exact_score is not None else heuristic_score
+            outcome_score = self._clamp01(checker_score * 0.60 + fallback * 0.40)
         elif exact_score is not None:
             primary_tier = "exact"
             fallback = soft_score if soft_score is not None else heuristic_score
@@ -2077,7 +2097,7 @@ Please show me the complete process including testing.""",
             outcome_score = self._clamp01(llm_judge_score)
 
         high_supervision_available = checker_executed
-        high_supervision_score = checker_score if checker_executed else 0.0
+        high_supervision_score = (1.0 if checker_passed else checker_score) if checker_executed else 0.0
 
         evidence_quality = {
             "primary_tier": primary_tier,
@@ -2118,11 +2138,14 @@ Please show me the complete process including testing.""",
 
         oracle_state = "not_applicable"
         if evidence_quality.get("high_supervision_available"):
-            oracle_state = (
-                "pass"
-                if evidence_quality.get("high_supervision_score", 0.0) >= criteria.min_accuracy_threshold
-                else "fail"
-            )
+            if "checker_passed" in evidence_quality:
+                oracle_state = "pass" if bool(evidence_quality.get("checker_passed")) else "fail"
+            else:
+                oracle_state = (
+                    "pass"
+                    if evidence_quality.get("high_supervision_score", 0.0) >= criteria.min_accuracy_threshold
+                    else "fail"
+                )
 
         cap = 1.0
         if not safety_pass:
@@ -2311,6 +2334,7 @@ Please show me the complete process including testing.""",
             clear_metrics=clear_metrics,
             log_analysis=log_analysis,
             criteria=test_case.evaluation_criteria,
+            expected_recoverable_errors=test_case.expected_recoverable_errors,
         )
         efficiency_score = self._calculate_basic_efficiency_dimension_v2(
             test_case=test_case,
@@ -2327,6 +2351,7 @@ Please show me the complete process including testing.""",
             log_analysis=log_analysis,
             stdout=stdout,
             stderr=stderr,
+            expected_recoverable_errors=test_case.expected_recoverable_errors,
         )
 
         baseline = self._task_baseline(test_case)
@@ -2339,6 +2364,8 @@ Please show me the complete process including testing.""",
         supports_structured_trace = bool(self.resolved_capabilities.get("structured_trace", False))
         supports_tool_trace = bool(self.resolved_capabilities.get("tool_trace", False))
         supports_step_trace = bool(self.resolved_capabilities.get("step_trace", False))
+        supports_timeline_events = bool(self.resolved_capabilities.get("timeline_events", False))
+        supports_session_stats = bool(self.resolved_capabilities.get("session_stats", False))
         supports_provider_cost = bool(self.resolved_capabilities.get("provider_cost", False))
         supports_token_usage = bool(self.resolved_capabilities.get("token_usage", False))
         has_session_stats = bool(log_analysis.get("session_stats", {}))
@@ -2346,20 +2373,26 @@ Please show me the complete process including testing.""",
         has_tool_signal = bool(log_analysis.get("tool_call_count", 0) > 0)
         has_step_signal = bool(log_analysis.get("total_steps", 0) > 0)
         has_timeline_signal = bool(log_analysis.get("detailed_timeline"))
-        observed_structured_trace = bool(
-            clear_metrics.supports_structured_trace or has_tool_signal or has_step_signal or has_timeline_signal
+        has_structured_trace_signal = bool(
+            clear_metrics.supports_structured_trace
+            or log_analysis.get("has_structured_trace")
+            or has_tool_signal
+            or has_step_signal
+            or has_timeline_signal
         )
-        observed_tool_trace = bool(has_tool_signal)
-        observed_step_trace = bool(has_step_signal)
-        supports_process = bool(
-            (supports_structured_trace and supports_tool_trace and supports_step_trace)
-            or (observed_structured_trace and observed_tool_trace and observed_step_trace)
+        observed_structured_trace = bool(supports_structured_trace and has_structured_trace_signal)
+        observed_tool_trace = bool(supports_tool_trace and has_tool_signal)
+        observed_step_trace = bool(supports_step_trace and has_step_signal)
+        observed_timeline_events = bool(supports_timeline_events and has_timeline_signal)
+
+        supports_process = bool(supports_structured_trace and supports_tool_trace and supports_step_trace)
+        observes_process = bool(
+            supports_process and observed_structured_trace and observed_tool_trace and observed_step_trace
         )
-        observes_process = bool(supports_process and observed_structured_trace and observed_tool_trace and observed_step_trace)
         supports_tool_efficiency = bool(
-            test_case.evaluation_criteria.expected_tools and (supports_tool_trace or observed_tool_trace)
+            test_case.evaluation_criteria.expected_tools and supports_tool_trace
         )
-        supports_trace_quality = bool(supports_structured_trace or observed_structured_trace)
+        supports_trace_quality = bool(supports_structured_trace)
 
         dimension_details: Dict[str, Dict[str, Any]] = {
             "outcome": self._dimension_detail(
@@ -2395,7 +2428,11 @@ Please show me the complete process including testing.""",
                 missing_reasons=(
                     []
                     if observes_process
-                    else ["trace_or_step_or_tool_signal_missing"]
+                    else (
+                        ["process_trace_capability_unavailable"]
+                        if not supports_process
+                        else ["trace_or_step_or_tool_signal_missing"]
+                    )
                 ),
             ),
             "tool_efficiency": self._dimension_detail(
@@ -2403,7 +2440,15 @@ Please show me the complete process including testing.""",
                 supported=supports_tool_efficiency,
                 observed=supports_tool_efficiency and observed_tool_trace,
                 evidence_sources=["tool_trace"],
-                missing_reasons=[] if (supports_tool_efficiency and observed_tool_trace) else ["tool_trace_unavailable"],
+                missing_reasons=(
+                    []
+                    if (supports_tool_efficiency and observed_tool_trace)
+                    else (
+                        ["tool_trace_capability_unavailable"]
+                        if not supports_tool_efficiency
+                        else ["tool_trace_signal_missing"]
+                    )
+                ),
             ),
             "cost_efficiency": self._dimension_detail(
                 score=cost_efficiency_score,
@@ -2415,16 +2460,28 @@ Please show me the complete process including testing.""",
             "token_efficiency": self._dimension_detail(
                 score=token_efficiency_score,
                 supported=supports_token_usage,
-                observed=supports_token_usage and has_token_signal,
+                observed=supports_token_usage and supports_session_stats and has_token_signal,
                 evidence_sources=["session_stats_tokens"],
-                missing_reasons=[] if (supports_token_usage and has_token_signal) else ["token_usage_unavailable"],
+                missing_reasons=(
+                    []
+                    if (supports_token_usage and supports_session_stats and has_token_signal)
+                    else ["token_usage_unavailable"]
+                ),
             ),
             "trace_quality": self._dimension_detail(
                 score=trace_quality_score,
                 supported=supports_trace_quality,
                 observed=supports_trace_quality and observed_structured_trace,
                 evidence_sources=["trace_signal"],
-                missing_reasons=[] if (supports_trace_quality and observed_structured_trace) else ["structured_trace_unavailable"],
+                missing_reasons=(
+                    []
+                    if (supports_trace_quality and observed_structured_trace)
+                    else (
+                        ["structured_trace_capability_unavailable"]
+                        if not supports_trace_quality
+                        else ["structured_trace_signal_missing"]
+                    )
+                ),
             ),
         }
 
@@ -2485,10 +2542,10 @@ Please show me the complete process including testing.""",
             "structured_trace": observed_structured_trace,
             "tool_trace": observed_tool_trace,
             "step_trace": observed_step_trace,
-            "timeline_events": has_timeline_signal,
-            "session_stats": has_session_stats,
+            "timeline_events": observed_timeline_events,
+            "session_stats": bool(supports_session_stats and has_session_stats),
             "provider_cost": bool(supports_provider_cost and (not clear_metrics.cost_is_estimated)),
-            "token_usage": has_token_signal,
+            "token_usage": bool(supports_token_usage and supports_session_stats and has_token_signal),
         }
 
         comparability = self._classify_comparability_v2(
@@ -2611,10 +2668,32 @@ Please show me the complete process including testing.""",
                 "is_estimated": True,
             }
 
-        llm_w = sum(3 for e in timeline if e["event_type"] in LLM_TYPES)
-        tool_w = sum(1 for e in timeline if e["event_type"] in TOOL_TYPES)
-        coord_w = sum(0.5 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES)
+        llm_events = sum(1 for e in timeline if e["event_type"] in LLM_TYPES)
+        tool_events = sum(1 for e in timeline if e["event_type"] in TOOL_TYPES)
+        coord_events = sum(1 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES)
+
+        llm_w = llm_events * 3
+        tool_w = tool_events * 1
+        coord_w = coord_events * 0.5
         coord_w += 1.0  # baseline so coordination is never zero
+
+        if llm_events == 0:
+            total_w = tool_w + coord_w or 1.0
+            tool_s = round(execution_time * tool_w / total_w, 2)
+            coord_s = round(execution_time - tool_s, 2)
+            return {
+                "llm_inference_s": None,
+                "tool_execution_s": tool_s,
+                "coordination_s": coord_s,
+                "llm_inference_pct": None,
+                "tool_execution_pct": round(100 * tool_s / execution_time, 1) if execution_time else 0.0,
+                "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
+                "method": "timeline_weighted_no_llm_events",
+                "is_estimated": True,
+                "llm_events": 0,
+                "tool_events": tool_events,
+                "coord_events": coord_events,
+            }
 
         total_w = llm_w + tool_w + coord_w or 1.0
 
@@ -2631,9 +2710,9 @@ Please show me the complete process including testing.""",
             "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
             "method": "timeline_weighted",
             "is_estimated": True,
-            "llm_events": sum(1 for e in timeline if e["event_type"] in LLM_TYPES),
-            "tool_events": sum(1 for e in timeline if e["event_type"] in TOOL_TYPES),
-            "coord_events": sum(1 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES),
+            "llm_events": llm_events,
+            "tool_events": tool_events,
+            "coord_events": coord_events,
         }
 
     def _build_step_resource_profiles(
@@ -2705,9 +2784,17 @@ Please show me the complete process including testing.""",
 
         def _mean_metric(getter, default: float = 0.0) -> float:
             vals = [getter(r) for r in run_results]
-            if not vals:
+            numeric_vals: List[float] = []
+            for value in vals:
+                if value is None:
+                    continue
+                try:
+                    numeric_vals.append(float(value))
+                except (TypeError, ValueError):
+                    continue
+            if not numeric_vals:
                 return default
-            return float(statistics.fmean(vals))
+            return float(statistics.fmean(numeric_vals))
 
         cm = primary.clear_metrics
         cm.total_task_time = _mean_metric(lambda r: r.clear_metrics.total_task_time)
@@ -2957,16 +3044,26 @@ Please show me the complete process including testing.""",
                     dedup_recommendations.append(recommendation)
         primary.recommendations = dedup_recommendations
 
+        llm_samples = [
+            float(r.time_breakdown.get("llm_inference_s"))
+            for r in run_results
+            if r.time_breakdown.get("llm_inference_s") is not None
+        ]
+        llm_mean: Optional[float] = float(statistics.fmean(llm_samples)) if llm_samples else None
         primary.time_breakdown = {
-            "llm_inference_s": _mean_metric(lambda r: r.time_breakdown.get("llm_inference_s", 0.0)),
+            "llm_inference_s": llm_mean,
             "tool_execution_s": _mean_metric(lambda r: r.time_breakdown.get("tool_execution_s", 0.0)),
             "coordination_s": _mean_metric(lambda r: r.time_breakdown.get("coordination_s", 0.0)),
             "method": "multi_run_mean",
             "is_estimated": True,
+            "llm_observed_runs": len(llm_samples),
+            "aggregated_over_runs": run_count,
         }
         total_time = max(primary.clear_metrics.total_task_time, 1e-6)
-        primary.time_breakdown["llm_inference_pct"] = round(
-            100.0 * primary.time_breakdown["llm_inference_s"] / total_time, 1
+        primary.time_breakdown["llm_inference_pct"] = (
+            round(100.0 * primary.time_breakdown["llm_inference_s"] / total_time, 1)
+            if primary.time_breakdown["llm_inference_s"] is not None
+            else None
         )
         primary.time_breakdown["tool_execution_pct"] = round(
             100.0 * primary.time_breakdown["tool_execution_s"] / total_time, 1
@@ -3131,13 +3228,35 @@ Please show me the complete process including testing.""",
         )
         avg_runs_per_task = sum(r.repeat_stats.get("run_count", 1) for r in results) / total_tests
 
-        # Aggregate time breakdown across all results
-        avg_llm_s   = sum(r.time_breakdown.get("llm_inference_s", 0)   for r in results) / total_tests
-        avg_tool_s  = sum(r.time_breakdown.get("tool_execution_s", 0)  for r in results) / total_tests
-        avg_coord_s = sum(r.time_breakdown.get("coordination_s", 0)    for r in results) / total_tests
-        avg_llm_pct   = round(100 * avg_llm_s   / avg_time, 1) if avg_time else 0
-        avg_tool_pct  = round(100 * avg_tool_s  / avg_time, 1) if avg_time else 0
-        avg_coord_pct = round(100 * avg_coord_s / avg_time, 1) if avg_time else 0
+        def _mean_numeric(values: List[Any]) -> Optional[float]:
+            numeric_values: List[float] = []
+            for value in values:
+                if value is None:
+                    continue
+                try:
+                    numeric_values.append(float(value))
+                except (TypeError, ValueError):
+                    continue
+            if not numeric_values:
+                return None
+            return float(statistics.fmean(numeric_values))
+
+        def _fmt_seconds(value: Optional[float]) -> str:
+            return f"{value:.2f}s" if value is not None else "n/a"
+
+        def _fmt_seconds_cell(value: Optional[float]) -> str:
+            return f"{value:.2f}" if value is not None else "n/a"
+
+        def _fmt_pct(value: Optional[float]) -> str:
+            return f"{value}%" if value is not None else "n/a"
+
+        # Aggregate time breakdown across all results.
+        avg_llm_s = _mean_numeric([r.time_breakdown.get("llm_inference_s") for r in results])
+        avg_tool_s = _mean_numeric([r.time_breakdown.get("tool_execution_s") for r in results]) or 0.0
+        avg_coord_s = _mean_numeric([r.time_breakdown.get("coordination_s") for r in results]) or 0.0
+        avg_llm_pct = round(100 * avg_llm_s / avg_time, 1) if (avg_time and avg_llm_s is not None) else None
+        avg_tool_pct = round(100 * avg_tool_s / avg_time, 1) if avg_time else 0.0
+        avg_coord_pct = round(100 * avg_coord_s / avg_time, 1) if avg_time else 0.0
         
         # Generate comprehensive report
         report = f"""# Agent CLEAR Framework Evaluation Report
@@ -3224,15 +3343,15 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 
 > Time is partitioned into three phases using timeline-weighted analysis
 > (method: `{results[0].time_breakdown.get("method", "n/a") if results else "n/a"}`).
-> LLM inference events are weighted 3× relative to tool calls, reflecting API round-trip latency.
+> If no LLM events are detected in a runtime trace, LLM time is reported as `n/a` (unknown).
 
 ### Aggregate (across all tasks)
 
 | Phase | Avg Time (s) | Avg % of Total |
 |-------|-------------|----------------|
-| 🧠 LLM Inference | {avg_llm_s:.2f}s | {avg_llm_pct}% |
-| 🔧 Tool Execution | {avg_tool_s:.2f}s | {avg_tool_pct}% |
-| 🔄 Coordination | {avg_coord_s:.2f}s | {avg_coord_pct}% |
+| 🧠 LLM Inference | {_fmt_seconds(avg_llm_s)} | {_fmt_pct(avg_llm_pct)} |
+| 🔧 Tool Execution | {_fmt_seconds(avg_tool_s)} | {_fmt_pct(avg_tool_pct)} |
+| 🔄 Coordination | {_fmt_seconds(avg_coord_s)} | {_fmt_pct(avg_coord_pct)} |
 | **Total** | **{avg_time:.2f}s** | **100%** |
 
 ### Per-Task Breakdown
@@ -3243,14 +3362,20 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
         for result in results:
             bd = result.time_breakdown
             total = result.clear_metrics.total_task_time
+            llm_s = bd.get("llm_inference_s")
+            llm_pct = bd.get("llm_inference_pct")
+            tool_s = bd.get("tool_execution_s")
+            tool_pct = bd.get("tool_execution_pct")
+            coord_s = bd.get("coordination_s")
+            coord_pct = bd.get("coordination_pct")
             report += (
                 f"| {result.test_case.name} "
-                f"| {bd.get('llm_inference_s', 0):.2f} "
-                f"| {bd.get('llm_inference_pct', 0)}% "
-                f"| {bd.get('tool_execution_s', 0):.2f} "
-                f"| {bd.get('tool_execution_pct', 0)}% "
-                f"| {bd.get('coordination_s', 0):.2f} "
-                f"| {bd.get('coordination_pct', 0)}% "
+                f"| {_fmt_seconds_cell(llm_s)} "
+                f"| {_fmt_pct(llm_pct)} "
+                f"| {_fmt_seconds_cell(tool_s)} "
+                f"| {_fmt_pct(tool_pct)} "
+                f"| {_fmt_seconds_cell(coord_s)} "
+                f"| {_fmt_pct(coord_pct)} "
                 f"| {total:.2f} |\n"
             )
 
@@ -3529,6 +3654,7 @@ async def main(argv: Optional[List[str]] = None):
         or args.probe_only
         or args.refresh_capability_profile
         or probe_enabled_by_config
+        or profile_exists
     )
     if use_capability_profile:
         evaluation_settings, evaluation_source = resolve_evaluation_settings(

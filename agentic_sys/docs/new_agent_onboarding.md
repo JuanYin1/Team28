@@ -95,6 +95,8 @@ agents:
 
 ### 4.2 `evaluation_capabilities`
 Declares expected observability. This affects which dimensions can be supported/observed.
+Important: full comparability requires both capability support and observed runtime signals.
+Regex hits in logs cannot substitute for missing capability declarations.
 
 ### 4.3 `evaluation_trace_parser`
 Regex extractor for runtime-specific logs.
@@ -144,6 +146,8 @@ Optional probe flow:
 python clear_evaluation_system.py --agent my-agent --probe-agent
 python clear_evaluation_system.py --agent my-agent --probe-only
 ```
+
+If `artifacts/capability_profiles/<agent>.json` already exists, phase3 will load it by default.
 
 ## 8) Debugging Quick Map
 

@@ -65,6 +65,7 @@ This section explains every V2 scoring-related field and what it means.
 
 Default comparable dimensions:
 - `outcome`: checker-grounded completion quality.
+  - checker tiers: `checker-grounded` (checker passed), `checker-partial` (checker ran but failed), then fallback `exact`/`soft-match`/`llm-judge`/`heuristic`.
 - `safety`: policy/error-density/success stability.
 - `robustness`: repeatability across runs.
 - `basic_efficiency`: wall-clock efficiency against task baseline.
@@ -190,6 +191,7 @@ For each run, evaluator consumes:
 - `resolved_capabilities` (conservative effective capabilities)
 
 When probe is present, effective capabilities must not be optimistic.
+In phase3 CLI flow, if a capability profile file already exists, it is loaded by default even without an explicit probe flag.
 
 ## 4) Per-Task Data Flow
 
@@ -214,6 +216,8 @@ When probe is present, effective capabilities must not be optimistic.
 
 - `core_status=COMPARABLE` requires all configured core conditions.
 - `full_status=COMPARABLE` requires core plus full-comparability conditions.
+  - Full required signals must be both supported by resolved capabilities and observed at runtime.
+  - Parsed log events alone must not "upgrade" unsupported capabilities to full comparable.
 - `SOFT_NON_COMPARABLE`: non-fatal missing coverage/signals.
 - `HARD_NON_COMPARABLE`: hard requirement violated.
 
@@ -233,6 +237,7 @@ Each saved JSON must include:
 - `evidence_quality`
 - `gate_status`
 - `repeat_stats`
+- `time_breakdown` (`llm_inference_s` may be `null` when no LLM events are detected)
 
 ## 7) Regression Expectations
 

@@ -794,6 +794,25 @@ class AgentTimeBreakdownTests(unittest.TestCase):
         self.assertEqual(breakdown["tool_events"], 2)
         self.assertGreater(breakdown["tool_execution_s"], 0.0)
 
+    def test_time_breakdown_marks_llm_unknown_when_no_llm_events(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        breakdown = evaluator._calculate_time_breakdown(
+            {
+                "detailed_timeline": [
+                    {"event_type": "tool_call"},
+                    {"event_type": "tool_result"},
+                    {"event_type": "error"},
+                ]
+            },
+            execution_time=9.0,
+        )
+
+        self.assertIsNone(breakdown["llm_inference_s"])
+        self.assertIsNone(breakdown["llm_inference_pct"])
+        self.assertEqual(breakdown["method"], "timeline_weighted_no_llm_events")
+
 
 class AgentV2ScoringTests(unittest.TestCase):
     def test_process_dimension_penalizes_redundant_retries(self):
@@ -839,6 +858,64 @@ class AgentV2ScoringTests(unittest.TestCase):
 
         self.assertGreater(clean_score, retry_score)
 
+    def test_process_dimension_ignores_expected_recoverable_precondition_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        criteria = AgentTestCriteria(max_acceptable_steps=10)
+        metrics = AgentCLEARMetrics(
+            execution_success_rate=1.0,
+            tool_selection_accuracy=1.0,
+            error_recovery_effectiveness=1.0,
+            steps_to_completion=6,
+        )
+        log_with_expected_errors = {
+            "detailed_timeline": [
+                {"event_type": "tool_call", "tool_name": "read_file"},
+                {"event_type": "tool_call", "tool_name": "write_file"},
+            ],
+            "raw_text": "no such file\nsyntax error\nfixed",
+            "total_steps": 6,
+        }
+
+        penalized = evaluator._calculate_process_dimension_v2(
+            clear_metrics=metrics,
+            log_analysis=log_with_expected_errors,
+            criteria=criteria,
+            expected_recoverable_errors=False,
+        )
+        not_penalized = evaluator._calculate_process_dimension_v2(
+            clear_metrics=metrics,
+            log_analysis=log_with_expected_errors,
+            criteria=criteria,
+            expected_recoverable_errors=True,
+        )
+
+        self.assertGreater(not_penalized, penalized)
+
+    def test_safety_dimension_ignores_expected_recoverable_errors_after_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        metrics = AgentCLEARMetrics(execution_success_rate=1.0)
+        log_analysis = {"errors_encountered": 3, "total_steps": 6}
+        penalized, _ = evaluator._calculate_safety_dimension_v2(
+            clear_metrics=metrics,
+            log_analysis=log_analysis,
+            stdout="error fixed",
+            stderr="",
+            expected_recoverable_errors=False,
+        )
+        not_penalized, _ = evaluator._calculate_safety_dimension_v2(
+            clear_metrics=metrics,
+            log_analysis=log_analysis,
+            stdout="error fixed",
+            stderr="",
+            expected_recoverable_errors=True,
+        )
+
+        self.assertGreater(not_penalized, penalized)
+
     def test_outcome_dimension_prefers_checker_signal_over_heuristic(self):
         with tempfile.TemporaryDirectory() as tmp:
             evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
@@ -871,7 +948,7 @@ class AgentV2ScoringTests(unittest.TestCase):
         )
 
         self.assertGreater(score, 0.7)
-        self.assertEqual(evidence["primary_tier"], "oracle/executable")
+        self.assertEqual(evidence["primary_tier"], "checker-grounded")
         self.assertTrue(evidence["checker_executed"])
         self.assertFalse(evidence["include_in_total_score"])
 
@@ -1447,6 +1524,59 @@ class AgentV2FairnessTests(unittest.TestCase):
         self.assertIsNone(scored["dimension_details"]["process"]["score"])
         self.assertIn("process", scored["unknown_dimensions"])
         self.assertGreaterEqual(scored["score_coverage"], 0.99)
+
+    def test_observed_log_events_do_not_upgrade_full_comparability_without_capability_support(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={
+                    "runs_per_task": 3,
+                    "resolved_capabilities": {
+                        "structured_trace": False,
+                        "tool_trace": False,
+                        "step_trace": False,
+                        "timeline_events": False,
+                        "session_stats": False,
+                        "provider_cost": False,
+                        "token_usage": False,
+                        "checker_support": {
+                            "file_artifacts": True,
+                            "stdout_capture": True,
+                            "exit_code": True,
+                            "behavior_validation": True,
+                        },
+                    },
+                },
+            )
+
+        test_case = self._make_case()
+        test_case.evaluation_criteria.expected_tools = ["write_file"]
+        scored = evaluator._compute_v2_scoring(
+            test_case=test_case,
+            stdout="[FILE_CONTENT:out.txt]\nok\n[/FILE_CONTENT]",
+            stderr="",
+            clear_metrics=self._base_metrics(),
+            evaluation_result=EvaluationResult(overall_score=0.8, correctness_score=0.8),
+            log_analysis={
+                **self._base_log(),
+                "total_steps": 3,
+                "tool_call_count": 2,
+                "tools_used": ["write_file"],
+                "detailed_timeline": [
+                    {"event_type": "tool_call", "tool_name": "write_file"},
+                    {"event_type": "tool_result"},
+                    {"event_type": "error"},
+                ],
+                "has_structured_trace": True,
+            },
+            run_scores=[0.8, 0.8],
+            run_successes=[1.0, 1.0],
+        )
+        self.assertFalse(scored["comparability"]["required_signal_status"]["structured_trace"])
+        self.assertFalse(scored["comparability"]["required_signal_status"]["tool_trace"])
+        self.assertEqual(scored["comparability"]["core_status"], "COMPARABLE")
+        self.assertEqual(scored["comparability"]["full_status"], "SOFT_NON_COMPARABLE")
 
     def test_diagnostic_dimensions_do_not_change_main_score(self):
         with tempfile.TemporaryDirectory() as tmp:
