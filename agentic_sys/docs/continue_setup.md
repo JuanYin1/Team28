@@ -30,12 +30,6 @@ export PATH="$HOME/.local/bin:$PATH"
 
 ## 2) Set API key (required)
 
-Replace `<ORG_SCOPED_KEY>` with the key shared by the team.
-
-```bash
-export CONTINUE_API_KEY="<ORG_SCOPED_KEY>"
-```
-
 Persist it for future terminals:
 
 ```bash

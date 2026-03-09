@@ -236,7 +236,7 @@ Provide reasoning for each recommendation.""",
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=180
+            max_time_seconds=360
         ))
         
         return test_cases
@@ -356,6 +356,8 @@ Provide reasoning for each recommendation.""",
                 "total_execution_time": result.total_execution_time,
                 "execution_success": result.execution_success,
                 "agent_error": result.agent_error,
+                "full_agent_output": result.agent_output,
+                "full_agent_error": result.agent_error,
                 "output_length": len(result.agent_output),
                 "output_preview": preview
             },
