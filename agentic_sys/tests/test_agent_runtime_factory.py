@@ -28,11 +28,13 @@ class AgentFactoryTests(unittest.TestCase):
             agent_name="org/agent",
             config_path="team/config",
             model_slugs=["owner/model"],
+            transport="pty",
         )
         self.assertIsInstance(adapter, ContinueCnAdapter)
         self.assertEqual(adapter.agent_name, "org/agent")
         self.assertEqual(adapter.config_path, "team/config")
         self.assertEqual(adapter.model_slugs, ["owner/model"])
+        self.assertEqual(adapter.transport, "pty")
 
     def test_create_continue_adapter_auto_detects_executable(self):
         with patch("agent_runtime.adapters.ContinueCnAdapter.auto_detect") as detect:

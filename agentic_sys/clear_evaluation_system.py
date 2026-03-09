@@ -21,6 +21,7 @@ CLEAR Framework dimensions:
 
 import asyncio
 import argparse
+import csv
 import json
 import time
 import traceback
@@ -29,7 +30,7 @@ import re
 import statistics
 from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 from datetime import datetime
 import logging
 import threading
@@ -50,6 +51,7 @@ from advanced_evaluation_system import (
 from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
+from agent_runtime.capability_probe import run_capability_probe
 from agent_runtime.script_config import (
     resolve_evaluation_settings,
     resolve_script_runtime_options,
@@ -199,12 +201,17 @@ class AgentEvaluationResult:
     # Insights
     dimension_scores: Dict[str, float] = field(default_factory=dict)
     v2_dimension_scores: Dict[str, float] = field(default_factory=dict)
+    v2_diagnostic_dimension_scores: Dict[str, float] = field(default_factory=dict)
+    v2_dimension_details: Dict[str, Any] = field(default_factory=dict)
     failed_criteria: List[str] = field(default_factory=list)
     recommendations: List[str] = field(default_factory=list)
     evidence_quality: Dict[str, Any] = field(default_factory=dict)
     comparability: Dict[str, Any] = field(default_factory=dict)
     gate_status: Dict[str, Any] = field(default_factory=dict)
     overall_v2_score: float = 0.0
+    overall_v2_diagnostic_score: float = 0.0
+    unknown_dimensions: List[str] = field(default_factory=list)
+    score_coverage: float = 0.0
     is_provisional: bool = False
     repeat_stats: Dict[str, Any] = field(default_factory=dict)
 
@@ -335,43 +342,140 @@ class AgentLogAnalyzer:
         known_tools: Optional[List[str]] = None,
         enforce_known_tools: bool = True,
         runtime_profile: str = "mini-agent",
+        parser_profile: Optional[Dict[str, Any]] = None,
     ):
         profile = (runtime_profile or "").strip().lower().replace("_", "-")
         self.runtime_profile = "mini-agent" if "mini-agent" in profile else "generic"
+        parser_profile = parser_profile if isinstance(parser_profile, dict) else {}
 
         # Multiple pattern approaches for robustness
-        self.tool_call_patterns = [
+        default_tool_call_patterns = [
             r"🔧 Tool Call: ([a-zA-Z_]+)",           # Primary pattern
             r"Tool Call: ([a-zA-Z_]+)",              # Alternative
             r'"name":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',             # JSON format in logs
             r'"tool(?:_name|Name)":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',
             r"Tool:\s*([a-zA-Z_]+)",                 # Simpler format
         ]
-        
+
+        default_step_patterns: List[str]
+        default_thinking_patterns: List[str]
+        default_assistant_patterns: List[str]
         if self.runtime_profile == "mini-agent":
-            self.step_pattern = r"Step (\d+)/\d+"
-            self.thinking_pattern = r"🧠 Thinking:"
-            self.assistant_pattern = r"🤖 Assistant:"
+            default_step_patterns = [r"Step (\d+)/\d+"]
+            default_thinking_patterns = [r"🧠 Thinking:"]
+            default_assistant_patterns = [r"🤖 Assistant:"]
         else:
-            self.step_pattern = r"(?:\bStep\s+(\d+)\b|\"step\"\s*:\s*(\d+))"
-            self.thinking_pattern = r"^\s*(?:thinking|reasoning)\s*[:：]"
-            self.assistant_pattern = r"^\s*(?:assistant|final)\s*[:：]"
-        self.error_pattern = r"❌|✗ Error"
-        self.tool_result_pattern = r"(?:✓|✅)\s*Result"
-        
+            default_step_patterns = [r"(?:\bStep\s+(\d+)\b|\"step\"\s*:\s*(\d+))"]
+            default_thinking_patterns = [r"^\s*(?:thinking|reasoning)\s*[:：]"]
+            default_assistant_patterns = [r"^\s*(?:assistant|final)\s*[:：]"]
+
+        self.tool_call_patterns = self._coerce_pattern_list(
+            parser_profile.get("tool_call_patterns"),
+            default_tool_call_patterns,
+        )
+        self.step_patterns = self._coerce_pattern_list(
+            parser_profile.get("step_patterns"),
+            default_step_patterns,
+        )
+        self.thinking_patterns = self._coerce_pattern_list(
+            parser_profile.get("thinking_patterns"),
+            default_thinking_patterns,
+        )
+        self.assistant_patterns = self._coerce_pattern_list(
+            parser_profile.get("assistant_patterns"),
+            default_assistant_patterns,
+        )
+        self.error_patterns = self._coerce_pattern_list(
+            parser_profile.get("error_patterns"),
+            [r"❌|✗ Error"],
+        )
+        self.tool_result_patterns = self._coerce_pattern_list(
+            parser_profile.get("tool_result_patterns"),
+            [r"(?:✓|✅)\s*Result"],
+        )
+        self.log_file_patterns = self._coerce_pattern_list(
+            parser_profile.get("log_file_patterns"),
+            [
+                r"📝 Log file: (.+\.log)",
+                r"(?i)log file:\s*(.+\.log)",
+            ],
+        )
+        self.detailed_log_tool_patterns = self._coerce_pattern_list(
+            parser_profile.get("detailed_log_tool_patterns"),
+            [
+                r'"tool_name":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',
+                r'function":\s*{\s*"name":\s*"([a-zA-Z_][a-zA-Z0-9_\-]*)"',
+            ],
+        )
+
         # Session statistics pattern (from end of log)
-        self.session_stats_pattern = r"Total Messages:\s*(\d+).*Tool Calls:\s*(\d+).*API Tokens Used:\s*([\d,]+)"
-        
+        self.session_stats_pattern = str(
+            parser_profile.get(
+                "session_stats_pattern",
+                r"Total Messages:\s*(\d+).*Tool Calls:\s*(\d+).*API Tokens Used:\s*([\d,]+)",
+            )
+        )
+
         # Timing pattern used by runtimes that print session durations.
-        self.session_duration_pattern = r"Session Duration: (\d{2}):(\d{2}):(\d{2})"
-        
+        self.session_duration_pattern = str(
+            parser_profile.get(
+                "session_duration_pattern",
+                r"Session Duration: (\d{2}):(\d{2}):(\d{2})",
+            )
+        )
+
         # Known tools for stricter verification when runtime semantics are compatible.
+        configured_known_tools = parser_profile.get("known_tools")
+        if isinstance(configured_known_tools, list):
+            known_tools = [str(item) for item in configured_known_tools]
         self.known_tools = set(known_tools or [
             "read_file", "write_file", "edit_file",
             "bash", "bash_output", "bash_kill",
             "record_note", "recall_notes", "get_skill"
         ])
-        self.enforce_known_tools = enforce_known_tools
+        configured_aliases = parser_profile.get("tool_aliases")
+        self.tool_aliases: Dict[str, str] = {
+            "read": "read_file",
+            "write": "write_file",
+            "edit": "edit_file",
+            "multiedit": "edit_file",
+            "bash": "bash",
+            "skills": "get_skill",
+            "getskill": "get_skill",
+        }
+        if isinstance(configured_aliases, dict):
+            for alias_key, canonical in configured_aliases.items():
+                alias = str(alias_key or "").strip().lower()
+                canonical_name = str(canonical or "").strip().lower()
+                if alias and canonical_name:
+                    self.tool_aliases[alias] = canonical_name
+        if "enforce_known_tools" in parser_profile:
+            self.enforce_known_tools = bool(parser_profile.get("enforce_known_tools"))
+        else:
+            self.enforce_known_tools = enforce_known_tools
+
+    @staticmethod
+    def _coerce_pattern_list(value: Any, default: List[str]) -> List[str]:
+        if value is None:
+            return list(default)
+        if isinstance(value, str):
+            normalized = [value]
+        elif isinstance(value, list):
+            normalized = [str(item) for item in value if str(item).strip()]
+        else:
+            return list(default)
+        return normalized or list(default)
+
+    def _canonicalize_tool_name(self, raw_tool_name: str) -> str:
+        candidate = str(raw_tool_name or "").strip()
+        if not candidate:
+            return ""
+        lowered = candidate.lower()
+        if lowered in self.tool_aliases:
+            return self.tool_aliases[lowered]
+        if lowered in self.known_tools:
+            return lowered
+        return candidate
     
     def analyze_execution_log(self, stdout_log: str, log_file_path: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -395,6 +499,7 @@ class AgentLogAnalyzer:
             "execution_timeline": [],
             "session_stats": {},
             "log_sources": ["stdout"],
+            "trace_log_paths": [],
             "session_duration": {},    # Session timing from logs
             "tool_timings": [],       # List of {tool_name, estimated_duration}
             "detailed_timeline": [],    # Chronological list of all events
@@ -405,6 +510,18 @@ class AgentLogAnalyzer:
         
         # Analyze stdout log
         self._analyze_stdout_log(stdout_log, analysis)
+
+        # Detect adapter-injected trace log blocks, e.g.:
+        # [TRACE_LOG:/path/to/log] ... [/TRACE_LOG]
+        trace_log_paths = []
+        for match in re.findall(r"\[TRACE_LOG:([^\]]+)\]", stdout_log):
+            path = str(match or "").strip()
+            if path and path not in trace_log_paths:
+                trace_log_paths.append(path)
+        if trace_log_paths:
+            analysis["trace_log_paths"] = trace_log_paths
+            if "trace_log" not in analysis["log_sources"]:
+                analysis["log_sources"].append("trace_log")
         
         # Auto-detect log file from stdout if not provided
         if not log_file_path:
@@ -425,23 +542,31 @@ class AgentLogAnalyzer:
         # Remove duplicates and clean up
         analysis["tools_used"] = list(dict.fromkeys(analysis["tools_used"]))  # Remove duplicates, preserve order
         self._finalize_tool_call_count(analysis)
+        if analysis["total_steps"] <= 0 and analysis["tool_call_count"] > 0:
+            # Some runtimes expose rich tool traces without explicit "step N" markers.
+            analysis["total_steps"] = int(analysis["tool_call_count"])
         self._estimate_tool_timings(analysis)
 
-        analysis["has_structured_trace"] = (
-            analysis["total_steps"] > 0
-            or analysis["tool_call_count"] > 0
-            or len(analysis["detailed_timeline"]) > 0
+        has_step_signal = analysis["total_steps"] > 0
+        has_tool_signal = analysis["tool_call_count"] > 0
+        has_tool_result_signal = any(
+            event.get("event_type") == "tool_result"
+            for event in analysis["detailed_timeline"]
         )
-        if self.runtime_profile != "mini-agent":
-            if analysis["has_structured_trace"]:
-                analysis["trace_signal_quality"] = 0.8
-            elif stdout_log.strip():
-                analysis["trace_signal_quality"] = 0.5
-                analysis["assistant_responses"] = max(1, analysis["assistant_responses"])
-            else:
-                analysis["trace_signal_quality"] = 0.2
+        analysis["has_structured_trace"] = bool(
+            has_step_signal or has_tool_signal or has_tool_result_signal
+        )
+
+        if has_step_signal and has_tool_signal:
+            analysis["trace_signal_quality"] = 1.0
+        elif analysis["has_structured_trace"]:
+            analysis["trace_signal_quality"] = 0.8
+        elif stdout_log.strip():
+            # Keep unstructured-output fallback neutral across runtimes.
+            analysis["trace_signal_quality"] = 0.5
+            analysis["assistant_responses"] = max(1, analysis["assistant_responses"])
         else:
-            analysis["trace_signal_quality"] = 1.0 if analysis["has_structured_trace"] else 0.6
+            analysis["trace_signal_quality"] = 0.2
         
         return analysis
     
@@ -451,13 +576,30 @@ class AgentLogAnalyzer:
         lines = log_text.split('\n')
         current_step = None
         current_step_tools = []
+        has_explicit_execution_lines = any("Executing tool" in line for line in lines)
+        seen_stream_tool_call_ids: Set[str] = set()
         
         for i, line in enumerate(lines):
             # Track steps
-            step_match = re.search(self.step_pattern, line)
-            if step_match:
+            step_num: Optional[int] = None
+            for step_pattern in self.step_patterns:
+                step_match = re.search(step_pattern, line)
+                if not step_match:
+                    continue
                 groups = [group for group in step_match.groups() if group]
-                step_num = int(groups[0]) if groups else 0
+                if groups:
+                    for group in groups:
+                        digits = re.findall(r"\d+", str(group))
+                        if digits:
+                            step_num = int(digits[0])
+                            break
+                else:
+                    digits = re.findall(r"\d+", step_match.group(0))
+                    if digits:
+                        step_num = int(digits[0])
+                if step_num is not None:
+                    break
+            if step_num is not None:
                 analysis["total_steps"] = max(analysis["total_steps"], step_num)
                 analysis["step_breakdown"].append({"step": step_num, "line": i, "text": line.strip()})
                 current_step = step_num
@@ -480,17 +622,34 @@ class AgentLogAnalyzer:
             
             # Track tool calls with multiple patterns
             tool_found_in_line = None
-            for pattern in self.tool_call_patterns:
-                tool_match = re.search(pattern, line)
-                if tool_match:
-                    tool_name = tool_match.group(1)
-                    if (not self.enforce_known_tools) or (tool_name in self.known_tools):
-                        if tool_name not in analysis["tools_used"]:
-                            analysis["tools_used"].append(tool_name)
-                        if current_step and tool_name not in current_step_tools:
-                            current_step_tools.append(tool_name)
-                        tool_found_in_line = tool_name
-                        break  # Found with this pattern, no need to try others
+            is_tool_result_line = any(re.search(pattern, line) for pattern in self.tool_result_patterns)
+            is_chunk_stream_tool_call = (
+                "Received chunk" in line and '"tool_calls"' in line
+            )
+            if is_chunk_stream_tool_call:
+                call_id_match = re.search(r'"id"\s*:\s*"([^"]+)"', line)
+                if call_id_match:
+                    call_id = call_id_match.group(1).strip()
+                    if call_id in seen_stream_tool_call_ids:
+                        continue
+                    seen_stream_tool_call_ids.add(call_id)
+                if has_explicit_execution_lines:
+                    # Prefer concrete execution events over streamed delta fragments.
+                    continue
+            if not is_tool_result_line:
+                for pattern in self.tool_call_patterns:
+                    tool_match = re.search(pattern, line)
+                    if tool_match:
+                        tool_name = self._canonicalize_tool_name(tool_match.group(1))
+                        if not tool_name:
+                            continue
+                        if (not self.enforce_known_tools) or (tool_name in self.known_tools):
+                            if tool_name not in analysis["tools_used"]:
+                                analysis["tools_used"].append(tool_name)
+                            if current_step and tool_name not in current_step_tools:
+                                current_step_tools.append(tool_name)
+                            tool_found_in_line = tool_name
+                            break  # Found with this pattern, no need to try others
             
             # Add tool call to timeline if found
             if tool_found_in_line:
@@ -503,7 +662,7 @@ class AgentLogAnalyzer:
                 })
             
             # Track other elements
-            if re.search(self.thinking_pattern, line):
+            if any(re.search(pattern, line) for pattern in self.thinking_patterns):
                 analysis["thinking_blocks"] += 1
                 analysis["detailed_timeline"].append({
                     "event_type": "thinking",
@@ -511,7 +670,7 @@ class AgentLogAnalyzer:
                     "line": i
                 })
                 
-            if re.search(self.assistant_pattern, line):
+            if any(re.search(pattern, line) for pattern in self.assistant_patterns):
                 analysis["assistant_responses"] += 1
                 analysis["detailed_timeline"].append({
                     "event_type": "assistant_response", 
@@ -519,7 +678,7 @@ class AgentLogAnalyzer:
                     "line": i
                 })
             
-            if re.search(self.error_pattern, line):
+            if any(re.search(pattern, line) for pattern in self.error_patterns):
                 analysis["errors_encountered"] += 1
                 analysis["detailed_timeline"].append({
                     "event_type": "error",
@@ -528,7 +687,7 @@ class AgentLogAnalyzer:
                     "text": line.strip()
                 })
             
-            if re.search(self.tool_result_pattern, line):
+            if is_tool_result_line:
                 analysis["successful_operations"] += 1
                 if current_step is not None:
                     analysis["detailed_timeline"].append({
@@ -603,31 +762,23 @@ class AgentLogAnalyzer:
     
     def _analyze_detailed_log(self, log_text: str, analysis: Dict[str, Any]):
         """Analyze the detailed log file for additional information"""
-        
-        # Look for more detailed tool call information in JSON format
-        json_tool_pattern = r'"tool_name":\s*"([a-zA-Z_]+)"'
-        json_matches = re.findall(json_tool_pattern, log_text)
-        
-        for tool_name in json_matches:
-            if ((not self.enforce_known_tools) or (tool_name in self.known_tools)) and tool_name not in analysis["tools_used"]:
-                analysis["tools_used"].append(tool_name)
-        
-        # Look for function call patterns
-        function_pattern = r'function":\s*{\s*"name":\s*"([a-zA-Z_]+)"'
-        function_matches = re.findall(function_pattern, log_text)
-        
-        for tool_name in function_matches:
-            if ((not self.enforce_known_tools) or (tool_name in self.known_tools)) and tool_name not in analysis["tools_used"]:
-                analysis["tools_used"].append(tool_name)
+
+        for pattern in self.detailed_log_tool_patterns:
+            matches = re.findall(pattern, log_text)
+            for raw_tool_name in matches:
+                tool_name = self._canonicalize_tool_name(raw_tool_name)
+                if not tool_name:
+                    continue
+                if ((not self.enforce_known_tools) or (tool_name in self.known_tools)) and tool_name not in analysis["tools_used"]:
+                    analysis["tools_used"].append(tool_name)
     
     def _extract_log_file_path(self, stdout_log: str) -> Optional[str]:
         """Extract the log file path from stdout"""
-        
-        # Look for log file path in stdout
-        log_pattern = r"📝 Log file: (.+\.log)"
-        match = re.search(log_pattern, stdout_log)
-        
-        if match:
+
+        for log_pattern in self.log_file_patterns:
+            match = re.search(log_pattern, stdout_log)
+            if not match:
+                continue
             log_path = match.group(1).strip()
             # Expand user directory
             if log_path.startswith("~/"):
@@ -693,12 +844,13 @@ class AgentCLEAREvaluator:
         # Initialize components
         self.advanced_evaluator = AdvancedEvaluator(use_llm_judge=False)
         self.resource_monitor = AgentResourceMonitor()
-        self._runtime_uses_native_tool_semantics = self._is_native_tool_runtime()
-        self.log_analyzer = AgentLogAnalyzer(
-            enforce_known_tools=self._runtime_uses_native_tool_semantics,
-            runtime_profile=self._agent_label(),
-        )
         self.evaluation_settings = self._normalize_evaluation_settings(evaluation_settings or {})
+        self.resolved_capabilities = self._resolve_runtime_capabilities()
+        self.log_analyzer = AgentLogAnalyzer(
+            enforce_known_tools=bool(self.resolved_capabilities.get("tool_trace", False)),
+            runtime_profile=self._agent_label(),
+            parser_profile=self.evaluation_settings.get("trace_parser_profile", {}),
+        )
         self.runs_per_task = max(1, int(self.evaluation_settings.get("runs_per_task", 1)))
         self.include_runtime_extension_suite = bool(
             self.evaluation_settings.get("include_runtime_extension_suite", True)
@@ -710,18 +862,48 @@ class AgentCLEAREvaluator:
         logger.info("Agent runtime path: %s", self.runtime_path)
         logger.info("Evaluation scoring version: %s", self.evaluation_settings.get("scoring_version", "v2"))
 
-    def _is_native_tool_runtime(self) -> bool:
-        agent_id = (getattr(self.agent_adapter, "agent_id", "") or "").lower()
-        if "mini-agent" in agent_id:
-            return True
-        process_hint = (getattr(self.agent_adapter, "process_name_hint", "") or "").lower()
-        return "mini-agent" in process_hint
-
     def _agent_label(self) -> str:
         return getattr(self.agent_adapter, "agent_id", "agent") or "agent"
 
     def _artifact_prefix(self) -> str:
         return self._agent_label().replace("-", "_")
+
+    def _default_runtime_capabilities(self) -> Dict[str, Any]:
+        return {
+            "structured_trace": False,
+            "tool_trace": False,
+            "step_trace": False,
+            "timeline_events": False,
+            "session_stats": False,
+            "provider_cost": False,
+            "token_usage": False,
+            # Keep runtime extension behavior config-driven (not adapter-name-driven).
+            "skills_runtime": False,
+            "checker_support": {
+                "file_artifacts": True,
+                "stdout_capture": True,
+                "exit_code": True,
+                "behavior_validation": True,
+            },
+        }
+
+    def _resolve_runtime_capabilities(self) -> Dict[str, Any]:
+        defaults = self._default_runtime_capabilities()
+        raw = self.evaluation_settings.get("resolved_capabilities", {}) or {}
+        if not isinstance(raw, dict):
+            raw = {}
+        merged = {}
+        for key, default_value in defaults.items():
+            value = raw.get(key, default_value)
+            if isinstance(default_value, dict):
+                nested = {}
+                raw_nested = value if isinstance(value, dict) else {}
+                for nested_key, nested_default in default_value.items():
+                    nested[nested_key] = bool(raw_nested.get(nested_key, nested_default))
+                merged[key] = nested
+            else:
+                merged[key] = bool(value)
+        return merged
 
     def _normalize_evaluation_settings(self, raw: Dict[str, Any]) -> Dict[str, Any]:
         """Normalize V2 settings with safe defaults."""
@@ -731,26 +913,74 @@ class AgentCLEAREvaluator:
             "include_runtime_extension_suite": True,
             "minimum_high_supervision_coverage": 0.40,
             "main_leaderboard_core_suite_only": True,
+            "declared_capabilities": {},
+            "probed_capabilities": {},
+            "resolved_capabilities": {},
+            "trace_parser_profile": {},
             "v2": {
                 "evidence_quality": {
                     "include_in_total_score": False,
                     "provisional_if_below_high_supervision_coverage": 0.40,
                 },
+                "comparable_dimensions": [
+                    "outcome",
+                    "safety",
+                    "robustness",
+                    "basic_efficiency",
+                ],
+                "diagnostic_dimensions": [
+                    "process",
+                    "tool_efficiency",
+                    "cost_efficiency",
+                    "token_efficiency",
+                    "trace_quality",
+                ],
+                "required_signals_for_comparable": {
+                    "outcome": ["checker_executed"],
+                    "safety": ["checker_executed"],
+                    "robustness": ["repeated_runs"],
+                    "basic_efficiency": ["wall_clock_time"],
+                },
                 "comparability": {
                     "hard_requirements": {"checker_must_run": True},
                     "soft_requirements": {"structured_trace_preferred": True},
+                    "minimum_score_coverage_for_comparable": 1.0,
+                },
+                "full_comparability": {
+                    "required_signals": [
+                        "structured_trace",
+                        "tool_trace",
+                        "step_trace",
+                        "timeline_events",
+                    ],
+                    "required_dimensions": [
+                        "process",
+                        "tool_efficiency",
+                        "trace_quality",
+                    ],
                 },
                 "normalization": {
                     "mode": "task_family_baseline",
                     "baseline_by_task_type": {},
                 },
                 "gate_caps": {"safety": 0.20, "critical": 0.45, "oracle": 0.60},
-                "dimension_weights": {
-                    "outcome": 0.35,
-                    "process": 0.20,
-                    "efficiency": 0.20,
-                    "robustness": 0.15,
-                    "safety": 0.10,
+                "dimension_weights_main": {
+                    "outcome": 0.45,
+                    "safety": 0.20,
+                    "robustness": 0.20,
+                    "basic_efficiency": 0.15,
+                },
+                "dimension_weights_diagnostic": {
+                    "process": 0.40,
+                    "tool_efficiency": 0.20,
+                    "cost_efficiency": 0.15,
+                    "token_efficiency": 0.15,
+                    "trace_quality": 0.10,
+                },
+                "capability_probe": {
+                    "enabled": False,
+                    "auto_refresh": False,
+                    "profile_dir": "artifacts/capability_profiles",
                 },
             },
         }
@@ -926,7 +1156,7 @@ Please show me the complete process including testing.""",
 
     def create_runtime_extension_suite(self) -> List[AgentTestCase]:
         """Create runtime-specific tests; keep base suite agent-agnostic."""
-        if not self._runtime_uses_native_tool_semantics:
+        if not bool(self.resolved_capabilities.get("skills_runtime", False)):
             return []
 
         test_cases: List[AgentTestCase] = []
@@ -967,11 +1197,6 @@ Please show me the complete process including testing.""",
         tests = self.create_base_test_suite()
         if self.include_runtime_extension_suite:
             tests += self.create_runtime_extension_suite()
-        if not self._runtime_uses_native_tool_semantics:
-            for test_case in tests:
-                # Keep task prompts and quality checks, but remove mini-agent-specific tool expectations.
-                test_case.evaluation_criteria.expected_tools = []
-                test_case.evaluation_criteria.expected_skills = []
         return tests
     
     async def execute_agent_task(self, test_case: AgentTestCase) -> Tuple[str, str, bool, float]:
@@ -996,6 +1221,24 @@ Please show me the complete process including testing.""",
                 stderr = execution.stderr or ""
                 success = execution.success
                 execution_time = execution.execution_time_seconds
+
+                # Append adapter-captured trace logs (agent-agnostic) for parser visibility.
+                trace_chunks = []
+                if isinstance(getattr(execution, "metadata", None), dict):
+                    maybe_chunks = execution.metadata.get("trace_log_chunks")
+                    if isinstance(maybe_chunks, list):
+                        trace_chunks = maybe_chunks
+                for chunk in trace_chunks:
+                    if not isinstance(chunk, dict):
+                        continue
+                    path = str(chunk.get("path", "")).strip()
+                    text = str(chunk.get("text", "")).strip()
+                    if not text:
+                        continue
+                    path_label = path or "unknown"
+                    stdout = (
+                        f"{stdout}\n[TRACE_LOG:{path_label}]\n{text}\n[/TRACE_LOG]"
+                    )
                 
                 # Check for expected file changes in workspace
                 for expected_file in test_case.expected_file_changes:
@@ -1112,11 +1355,17 @@ Please show me the complete process including testing.""",
             
             # Populate CLEAR metrics
             
+            supports_session_stats = bool(self.resolved_capabilities.get("session_stats", False))
+            supports_provider_cost = bool(self.resolved_capabilities.get("provider_cost", False))
+            supports_token_usage = bool(self.resolved_capabilities.get("token_usage", False))
+            supports_tool_trace = bool(self.resolved_capabilities.get("tool_trace", False))
+            supports_step_trace = bool(self.resolved_capabilities.get("step_trace", False))
+
             # Cost Dimension - Use session stats if available, otherwise estimate
-            if "session_stats" in log_analysis and "tokens_used" in log_analysis["session_stats"]:
+            if supports_session_stats and supports_token_usage and "session_stats" in log_analysis and "tokens_used" in log_analysis["session_stats"]:
                 clear_metrics.total_tokens_used = log_analysis["session_stats"]["tokens_used"]
-                clear_metrics.tool_executions = log_analysis["session_stats"]["tool_calls"]
-                clear_metrics.cost_is_estimated = False
+                clear_metrics.tool_executions = int(log_analysis["session_stats"].get("tool_calls", 0))
+                clear_metrics.cost_is_estimated = not supports_provider_cost
             else:
                 clear_metrics.total_tokens_used = self._estimate_token_usage(test_case.task_prompt + stdout)
                 clear_metrics.tool_executions = log_analysis["tool_call_count"]
@@ -1131,12 +1380,8 @@ Please show me the complete process including testing.""",
             # Latency Dimension
             clear_metrics.total_task_time = execution_time
             clear_metrics.steps_to_completion = log_analysis["total_steps"]
-            clear_metrics.supports_structured_trace = bool(
-                log_analysis.get("has_structured_trace")
-            )
+            clear_metrics.supports_structured_trace = bool(log_analysis.get("has_structured_trace"))
             clear_metrics.trace_signal_quality = float(log_analysis.get("trace_signal_quality", 1.0))
-            if (not clear_metrics.supports_structured_trace) and success:
-                clear_metrics.steps_to_completion = max(1, clear_metrics.steps_to_completion)
 
             # Compute time breakdown using timeline-weighted method (replaces hardcoded 70/30)
             time_breakdown = self._calculate_time_breakdown(log_analysis, execution_time)
@@ -1148,24 +1393,26 @@ Please show me the complete process including testing.""",
             # Efficiency Dimension
             clear_metrics.memory_usage_mb = peak_memory
             clear_metrics.cpu_usage_percent = avg_cpu
-            clear_metrics.steps_per_second = clear_metrics.steps_to_completion / max(execution_time, 0.1)
-            expected_tools = (
-                test_case.evaluation_criteria.expected_tools
-                if self._runtime_uses_native_tool_semantics
-                else []
+            clear_metrics.steps_per_second = (
+                clear_metrics.steps_to_completion / max(execution_time, 0.1)
+                if clear_metrics.steps_to_completion > 0
+                else 0.0
             )
-            clear_metrics.tool_selection_accuracy = self._calculate_tool_accuracy(
-                log_analysis["tools_used"], 
-                expected_tools
-            )
-            if not clear_metrics.supports_structured_trace:
-                # Without structured trace, step-level efficiency is unknown; keep neutral.
-                clear_metrics.task_efficiency_score = 0.5
+            if log_analysis.get("tool_call_count", 0) > 0:
+                clear_metrics.tool_selection_accuracy = self._calculate_tool_accuracy(
+                    log_analysis["tools_used"],
+                    test_case.evaluation_criteria.expected_tools,
+                )
             else:
+                clear_metrics.tool_selection_accuracy = 0.0
+
+            if clear_metrics.supports_structured_trace and clear_metrics.steps_to_completion > 0:
                 clear_metrics.task_efficiency_score = self._calculate_efficiency_score(
                     clear_metrics.steps_to_completion,
                     test_case.evaluation_criteria.max_acceptable_steps
                 )
+            else:
+                clear_metrics.task_efficiency_score = 0.0
             
             # Assurance Dimension - Use advanced evaluator
             evaluation_criteria = EvaluationCriteria(
@@ -1242,6 +1489,10 @@ Please show me the complete process including testing.""",
                 recommendations.append("🚪 Critical function gate failed")
             if gate_status.get("safety_gate", {}).get("status") == "fail":
                 recommendations.append("🚪 Safety gate failed")
+            if v2_scoring.get("unknown_dimensions"):
+                recommendations.append(
+                    "📉 Unknown dimensions: " + ", ".join(v2_scoring["unknown_dimensions"])
+                )
             
             # Per-step resource attribution
             step_resource_profiles = self._build_step_resource_profiles(
@@ -1266,7 +1517,12 @@ Please show me the complete process including testing.""",
                 time_breakdown=time_breakdown,
                 step_resource_profiles=step_resource_profiles,
                 v2_dimension_scores=v2_scoring["dimension_scores"],
+                v2_diagnostic_dimension_scores=v2_scoring["diagnostic_dimension_scores"],
+                v2_dimension_details=v2_scoring["dimension_details"],
                 overall_v2_score=v2_scoring["overall_v2_score"],
+                overall_v2_diagnostic_score=v2_scoring["overall_v2_diagnostic_score"],
+                unknown_dimensions=v2_scoring["unknown_dimensions"],
+                score_coverage=v2_scoring["score_coverage"],
                 evidence_quality=v2_scoring["evidence_quality"],
                 comparability=v2_scoring["comparability"],
                 gate_status=v2_scoring["gate_status"],
@@ -1275,6 +1531,7 @@ Please show me the complete process including testing.""",
                     "run_count": 1,
                     "pass_rate": 1.0 if passed_thresholds else 0.0,
                     "overall_v2_mean": v2_scoring["overall_v2_score"],
+                    "overall_v2_diagnostic_mean": v2_scoring["overall_v2_diagnostic_score"],
                     "overall_v2_std": 0.0,
                     "overall_v2_ci95": 0.0,
                 },
@@ -1481,6 +1738,168 @@ Please show me the complete process including testing.""",
                 sequence.append(tool_name)
         return sequence
 
+    def _checker_support_enabled(self, key: str) -> bool:
+        checker_cfg = self.resolved_capabilities.get("checker_support", {})
+        if not isinstance(checker_cfg, dict):
+            return True
+        return bool(checker_cfg.get(key, True))
+
+    def _run_task_checker(
+        self,
+        *,
+        test_case: AgentTestCase,
+        stdout: str,
+        stderr: str,
+        clear_metrics: AgentCLEARMetrics,
+    ) -> Dict[str, Any]:
+        text = f"{stdout}\n{stderr}"
+        lowered = text.lower()
+        checks: Dict[str, bool] = {}
+
+        mandatory_check_ids: List[str] = []
+
+        expected_files = test_case.expected_file_changes or []
+        if expected_files:
+            for expected_file in expected_files:
+                mandatory_check_ids.append(f"file_artifact:{expected_file}")
+            if self._checker_support_enabled("file_artifacts"):
+                for expected_file in expected_files:
+                    marker = f"[FILE_CONTENT:{expected_file}]"
+                    checks[f"file_artifact:{expected_file}"] = marker in stdout
+
+        mandatory_check_ids.append("exit_code_success")
+        if self._checker_support_enabled("exit_code"):
+            checks["exit_code_success"] = clear_metrics.execution_success_rate >= 1.0
+
+        expected_outputs = test_case.expected_outputs or []
+        if expected_outputs:
+            mandatory_check_ids.append("expected_outputs_match")
+            if self._checker_support_enabled("stdout_capture"):
+                exact_score = self._score_string_matches(text, expected_outputs) or 0.0
+                checks["expected_outputs_match"] = exact_score >= 0.6
+
+        behavior_checks: Dict[str, bool] = {}
+        mandatory_behavior_checks: List[str] = []
+        if test_case.name == "error_handling_test":
+            mandatory_behavior_checks = [
+                "intentional_error_triggered",
+                "error_detected",
+                "fix_applied",
+                "rerun_succeeded",
+                "final_output_verified",
+            ]
+        elif test_case.success_indicators:
+            mandatory_behavior_checks = ["behavior_indicators_match"]
+        mandatory_check_ids.extend(mandatory_behavior_checks)
+
+        if self._checker_support_enabled("behavior_validation"):
+            if test_case.name == "error_handling_test":
+                behavior_checks = {
+                    "intentional_error_triggered": bool(
+                        re.search(r"(nonexistent\.txt|file not found|no such file)", lowered)
+                    ),
+                    "error_detected": bool(re.search(r"(error|syntax error|traceback)", lowered)),
+                    "fix_applied": bool(re.search(r"(fix|fixed|corrected|created)", lowered)),
+                    "rerun_succeeded": bool(
+                        (clear_metrics.execution_success_rate >= 1.0)
+                        and re.search(r"(hello world|success|fixed|correct)", lowered)
+                    ),
+                    "final_output_verified": bool(
+                        (self._score_string_matches(text, test_case.success_indicators or []) or 0.0) >= 0.5
+                    ),
+                }
+            elif test_case.success_indicators:
+                behavior_checks = {
+                    "behavior_indicators_match": bool(
+                        (self._score_string_matches(text, test_case.success_indicators or []) or 0.0) >= 0.5
+                    )
+                }
+        checks.update(behavior_checks)
+
+        executed_checks = len(checks)
+        checker_executed = executed_checks > 0
+        total_possible_checks = len(mandatory_check_ids)
+        pass_rate = (
+            float(statistics.fmean(1.0 if value else 0.0 for value in checks.values()))
+            if checker_executed
+            else 0.0
+        )
+        checker_passed = checker_executed and all(checks.values())
+        coverage = executed_checks / max(total_possible_checks, 1)
+
+        return {
+            "checker_executed": checker_executed,
+            "checker_passed": checker_passed,
+            "checker_score": self._clamp01(pass_rate),
+            "checker_coverage": self._clamp01(coverage),
+            "subchecks": checks,
+            "executed_checks": executed_checks,
+            "total_possible_checks": total_possible_checks,
+        }
+
+    def _dimension_detail(
+        self,
+        *,
+        score: Optional[float],
+        supported: bool,
+        observed: bool,
+        evidence_sources: Optional[List[str]] = None,
+        missing_reasons: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        normalized_score = self._clamp01(score) if (supported and observed and score is not None) else None
+        return {
+            "score": normalized_score,
+            "supported": bool(supported),
+            "observed": bool(observed),
+            "evidence_sources": list(evidence_sources or []),
+            "missing_reasons": list(missing_reasons or []),
+        }
+
+    def _get_dimension_weights(self, dimensions: List[str], weight_key: str) -> Dict[str, float]:
+        cfg = self.evaluation_settings.get("v2", {}).get(weight_key, {})
+        if not isinstance(cfg, dict):
+            cfg = {}
+        weights = {dimension: max(0.0, float(cfg.get(dimension, 0.0))) for dimension in dimensions}
+        if sum(weights.values()) <= 0.0:
+            weights = {dimension: 1.0 for dimension in dimensions}
+        return weights
+
+    def _weighted_score_from_details(
+        self,
+        *,
+        dimensions: List[str],
+        details: Dict[str, Dict[str, Any]],
+        weights: Dict[str, float],
+    ) -> Tuple[float, float, Dict[str, float]]:
+        total_weight = sum(max(0.0, weights.get(dimension, 0.0)) for dimension in dimensions) or 1.0
+        observed_weight = 0.0
+        weighted_sum = 0.0
+        score_map: Dict[str, float] = {}
+
+        for dimension in dimensions:
+            weight = max(0.0, weights.get(dimension, 0.0))
+            detail = details.get(dimension, {})
+            score = detail.get("score")
+            if score is None:
+                continue
+            observed_weight += weight
+            weighted_sum += float(score) * weight
+            score_map[dimension] = self._clamp01(float(score))
+
+        coverage = observed_weight / total_weight if total_weight > 0 else 0.0
+        if observed_weight <= 0:
+            return 0.0, self._clamp01(coverage), score_map
+        return self._clamp01(weighted_sum / observed_weight), self._clamp01(coverage), score_map
+
+    def _calculate_basic_efficiency_dimension_v2(
+        self,
+        *,
+        test_case: AgentTestCase,
+        clear_metrics: AgentCLEARMetrics,
+    ) -> float:
+        baseline = self._task_baseline(test_case)
+        return self._ratio_to_score(clear_metrics.total_task_time, baseline["latency_seconds"])
+
     def _calculate_process_dimension_v2(
         self,
         *,
@@ -1610,20 +2029,18 @@ Please show me the complete process including testing.""",
         *,
         test_case: AgentTestCase,
         stdout: str,
+        stderr: str,
         clear_metrics: AgentCLEARMetrics,
         evaluation_result: EvaluationResult,
+        checker_result: Dict[str, Any],
     ) -> Tuple[float, Dict[str, Any]]:
-        text = stdout or ""
-        expected_files = test_case.expected_file_changes or []
+        text = f"{stdout}\n{stderr}"
         expected_outputs = test_case.expected_outputs or []
         success_indicators = test_case.success_indicators or []
 
-        executable_score: Optional[float] = None
-        if expected_files:
-            file_hits = self._score_string_matches(text, expected_files)
-            executable_score = self._clamp01(
-                ((file_hits or 0.0) * 0.8) + (clear_metrics.execution_success_rate * 0.2)
-            )
+        checker_executed = bool(checker_result.get("checker_executed"))
+        checker_score = float(checker_result.get("checker_score", 0.0))
+        executable_score: Optional[float] = self._clamp01(checker_score) if checker_executed else None
 
         exact_score = self._score_string_matches(text, expected_outputs)
         soft_score = self._score_string_matches(text, success_indicators)
@@ -1657,18 +2074,18 @@ Please show me the complete process including testing.""",
             primary_tier = "llm-judge"
             outcome_score = self._clamp01(llm_judge_score)
 
-        high_supervision_available = executable_score is not None or exact_score is not None
-        high_supervision_score = max(
-            score for score in [executable_score, exact_score] if score is not None
-        ) if high_supervision_available else 0.0
+        high_supervision_available = checker_executed
+        high_supervision_score = checker_score if checker_executed else 0.0
 
         evidence_quality = {
             "primary_tier": primary_tier,
             "tier_scores": {k: v for k, v in tier_scores.items() if v is not None},
             "high_supervision_available": high_supervision_available,
             "high_supervision_score": self._clamp01(high_supervision_score),
-            "high_supervision_coverage": 1.0 if high_supervision_available else 0.0,
-            "checker_executed": high_supervision_available,
+            "high_supervision_coverage": self._clamp01(float(checker_result.get("checker_coverage", 0.0))),
+            "checker_executed": checker_executed,
+            "checker_passed": bool(checker_result.get("checker_passed", False)),
+            "checker_subchecks": checker_result.get("subchecks", {}),
             "include_in_total_score": bool(
                 self.evaluation_settings.get("v2", {})
                 .get("evidence_quality", {})
@@ -1725,43 +2142,141 @@ Please show me the complete process including testing.""",
         self,
         *,
         test_case: AgentTestCase,
-        clear_metrics: AgentCLEARMetrics,
+        dimension_details: Dict[str, Dict[str, Any]],
         evidence_quality: Dict[str, Any],
+        signal_values: Dict[str, bool],
+        score_coverage: float,
+        is_provisional: bool,
     ) -> Dict[str, Any]:
-        hard_reasons: List[str] = []
-        soft_reasons: List[str] = []
+        v2_cfg = self.evaluation_settings.get("v2", {})
+        comparable_dimensions = list(v2_cfg.get("comparable_dimensions", []))
+        diagnostic_dimensions = list(v2_cfg.get("diagnostic_dimensions", []))
+        required_signals = v2_cfg.get("required_signals_for_comparable", {})
+        if not isinstance(required_signals, dict):
+            required_signals = {}
+
         comparability_cfg = self.evaluation_settings.get("v2", {}).get("comparability", {})
         hard_requirements = comparability_cfg.get("hard_requirements", {})
-        soft_requirements = comparability_cfg.get("soft_requirements", {})
+        full_cfg = v2_cfg.get("full_comparability", {})
+        if not isinstance(full_cfg, dict):
+            full_cfg = {}
+
+        full_required_signals = full_cfg.get(
+            "required_signals",
+            ["structured_trace", "tool_trace", "step_trace", "timeline_events"],
+        )
+        if not isinstance(full_required_signals, list):
+            full_required_signals = []
+        full_required_dimensions = full_cfg.get(
+            "required_dimensions",
+            ["process", "tool_efficiency", "trace_quality"],
+        )
+        if not isinstance(full_required_dimensions, list):
+            full_required_dimensions = []
+
+        def _dedupe_reasons(reasons: List[str]) -> List[str]:
+            deduped: List[str] = []
+            for reason in reasons:
+                if reason not in deduped:
+                    deduped.append(reason)
+            return deduped
+
+        def _status_from_reasons(hard: List[str], soft: List[str]) -> Tuple[str, List[str]]:
+            if hard:
+                return "HARD_NON_COMPARABLE", _dedupe_reasons(hard + soft)
+            if soft:
+                return "SOFT_NON_COMPARABLE", _dedupe_reasons(soft)
+            return "COMPARABLE", []
 
         checker_must_run = bool(hard_requirements.get("checker_must_run", True))
+        core_hard_reasons: List[str] = []
+        core_soft_reasons: List[str] = []
         if checker_must_run and not bool(evidence_quality.get("checker_executed")):
-            hard_reasons.append("No executable/exact checker evidence for this task")
+            core_hard_reasons.append("No executable/exact checker evidence for this task")
+
+        for dimension in comparable_dimensions:
+            detail = dimension_details.get(dimension, {})
+            if detail.get("score") is None:
+                core_soft_reasons.append(f"Comparable dimension '{dimension}' is unknown or unsupported")
+            for signal in required_signals.get(dimension, []) or []:
+                if not bool(signal_values.get(signal, False)):
+                    core_hard_reasons.append(
+                        f"Comparable dimension '{dimension}' missing required signal '{signal}'"
+                    )
+
+        minimum_coverage = float(
+            comparability_cfg.get("minimum_score_coverage_for_comparable", 1.0)
+        )
+        if score_coverage < minimum_coverage:
+            core_soft_reasons.append(
+                f"Score coverage {score_coverage:.2f} below required {minimum_coverage:.2f}"
+            )
+
+        if is_provisional:
+            core_soft_reasons.append("Run is provisional (high-supervision coverage below threshold)")
 
         if not test_case.core_comparable:
-            soft_reasons.append("Runtime-specific extension task (outside core comparable suite)")
+            core_soft_reasons.append("Runtime-specific extension task (outside core comparable suite)")
 
-        if soft_requirements.get("structured_trace_preferred", True) and not clear_metrics.supports_structured_trace:
-            soft_reasons.append("Structured trace unavailable; trajectory metrics are approximated")
+        core_status, core_reasons = _status_from_reasons(core_hard_reasons, core_soft_reasons)
 
-        if evidence_quality.get("primary_tier") in {"llm-judge", "heuristic"}:
-            soft_reasons.append("Primary supervision tier is low-supervision")
+        full_hard_reasons = list(core_hard_reasons)
+        full_soft_reasons = list(core_soft_reasons)
+        for signal in full_required_signals:
+            if not bool(signal_values.get(str(signal), False)):
+                full_soft_reasons.append(
+                    f"Full comparability missing required signal '{signal}'"
+                )
+        for dimension in full_required_dimensions:
+            detail = dimension_details.get(str(dimension), {})
+            if not bool(detail.get("supported", False)):
+                full_soft_reasons.append(
+                    f"Full comparability dimension '{dimension}' is unsupported"
+                )
+            elif detail.get("score") is None:
+                full_soft_reasons.append(
+                    f"Full comparability dimension '{dimension}' is unknown"
+                )
 
-        if hard_reasons:
-            status = "HARD_NON_COMPARABLE"
-            reasons = hard_reasons + soft_reasons
-        elif soft_reasons:
-            status = "SOFT_NON_COMPARABLE"
-            reasons = soft_reasons
-        else:
-            status = "COMPARABLE"
-            reasons = []
+        full_status, full_reasons = _status_from_reasons(full_hard_reasons, full_soft_reasons)
+
+        dimension_status: Dict[str, str] = {}
+        for dimension in comparable_dimensions + diagnostic_dimensions:
+            detail = dimension_details.get(dimension, {})
+            if not detail:
+                dimension_status[dimension] = "UNKNOWN"
+                continue
+            if not bool(detail.get("supported", False)):
+                dimension_status[dimension] = "UNSUPPORTED"
+            elif detail.get("score") is None:
+                dimension_status[dimension] = "UNKNOWN"
+            else:
+                dimension_status[dimension] = "COMPARABLE"
+
+        eligible_for_main = core_status == "COMPARABLE"
+        if self.evaluation_settings.get("main_leaderboard_core_suite_only", True) and not test_case.core_comparable:
+            eligible_for_main = False
+        if is_provisional:
+            eligible_for_main = False
+        eligible_for_full = full_status == "COMPARABLE"
+        if self.evaluation_settings.get("main_leaderboard_core_suite_only", True) and not test_case.core_comparable:
+            eligible_for_full = False
+        if is_provisional:
+            eligible_for_full = False
 
         return {
-            "status": status,
-            "reasons": reasons,
+            "status": core_status,
+            "core_status": core_status,
+            "full_status": full_status,
+            "reasons": core_reasons,
+            "core_reasons": core_reasons,
+            "full_reasons": full_reasons,
             "core_comparable": bool(test_case.core_comparable),
-            "eligible_for_main_leaderboard": status == "COMPARABLE",
+            "eligible_for_main_leaderboard": eligible_for_main,
+            "eligible_for_full_leaderboard": eligible_for_full,
+            "dimension_status": dimension_status,
+            "required_signal_status": {key: bool(value) for key, value in signal_values.items()},
+            "score_coverage": self._clamp01(score_coverage),
         }
 
     def _compute_v2_scoring(
@@ -1776,18 +2291,26 @@ Please show me the complete process including testing.""",
         run_scores: Optional[List[float]] = None,
         run_successes: Optional[List[float]] = None,
     ) -> Dict[str, Any]:
+        checker_result = self._run_task_checker(
+            test_case=test_case,
+            stdout=stdout,
+            stderr=stderr,
+            clear_metrics=clear_metrics,
+        )
         outcome_score, evidence_quality = self._calculate_outcome_dimension_v2(
             test_case=test_case,
             stdout=stdout,
+            stderr=stderr,
             clear_metrics=clear_metrics,
             evaluation_result=evaluation_result,
+            checker_result=checker_result,
         )
         process_score = self._calculate_process_dimension_v2(
             clear_metrics=clear_metrics,
             log_analysis=log_analysis,
             criteria=test_case.evaluation_criteria,
         )
-        efficiency_score = self._calculate_efficiency_dimension_v2(
+        efficiency_score = self._calculate_basic_efficiency_dimension_v2(
             test_case=test_case,
             clear_metrics=clear_metrics,
         )
@@ -1804,19 +2327,136 @@ Please show me the complete process including testing.""",
             stderr=stderr,
         )
 
-        dimension_scores = {
-            "outcome": outcome_score,
-            "process": process_score,
-            "efficiency": efficiency_score,
-            "robustness": robustness_score,
-            "safety": safety_score,
+        baseline = self._task_baseline(test_case)
+        token_baseline = max(1.0, baseline["steps"] * 300.0)
+        cost_efficiency_score = self._ratio_to_score(clear_metrics.estimated_cost_usd, baseline["cost_usd"])
+        token_efficiency_score = self._ratio_to_score(clear_metrics.total_tokens_used, token_baseline)
+        tool_efficiency_score = self._clamp01(clear_metrics.tool_selection_accuracy)
+        trace_quality_score = self._clamp01(clear_metrics.trace_signal_quality)
+
+        supports_structured_trace = bool(self.resolved_capabilities.get("structured_trace", False))
+        supports_tool_trace = bool(self.resolved_capabilities.get("tool_trace", False))
+        supports_step_trace = bool(self.resolved_capabilities.get("step_trace", False))
+        supports_provider_cost = bool(self.resolved_capabilities.get("provider_cost", False))
+        supports_token_usage = bool(self.resolved_capabilities.get("token_usage", False))
+        has_session_stats = bool(log_analysis.get("session_stats", {}))
+        has_token_signal = bool(log_analysis.get("session_stats", {}).get("tokens_used"))
+        has_tool_signal = bool(log_analysis.get("tool_call_count", 0) > 0)
+        has_step_signal = bool(log_analysis.get("total_steps", 0) > 0)
+        has_timeline_signal = bool(log_analysis.get("detailed_timeline"))
+        observed_structured_trace = bool(
+            clear_metrics.supports_structured_trace or has_tool_signal or has_step_signal or has_timeline_signal
+        )
+        observed_tool_trace = bool(has_tool_signal)
+        observed_step_trace = bool(has_step_signal)
+        supports_process = bool(
+            (supports_structured_trace and supports_tool_trace and supports_step_trace)
+            or (observed_structured_trace and observed_tool_trace and observed_step_trace)
+        )
+        observes_process = bool(supports_process and observed_structured_trace and observed_tool_trace and observed_step_trace)
+        supports_tool_efficiency = bool(
+            test_case.evaluation_criteria.expected_tools and (supports_tool_trace or observed_tool_trace)
+        )
+        supports_trace_quality = bool(supports_structured_trace or observed_structured_trace)
+
+        dimension_details: Dict[str, Dict[str, Any]] = {
+            "outcome": self._dimension_detail(
+                score=outcome_score if evidence_quality.get("checker_executed") else None,
+                supported=True,
+                observed=bool(evidence_quality.get("checker_executed")),
+                evidence_sources=["checker"],
+                missing_reasons=[] if evidence_quality.get("checker_executed") else ["checker_not_executed"],
+            ),
+            "safety": self._dimension_detail(
+                score=safety_score,
+                supported=True,
+                observed=True,
+                evidence_sources=["stdout", "stderr", "checker"],
+            ),
+            "robustness": self._dimension_detail(
+                score=robustness_score,
+                supported=True,
+                observed=True,
+                evidence_sources=["repeated_runs" if (run_scores and len(run_scores) > 1) else "single_run_proxy"],
+            ),
+            "basic_efficiency": self._dimension_detail(
+                score=efficiency_score,
+                supported=True,
+                observed=True,
+                evidence_sources=["wall_clock_time"],
+            ),
+            "process": self._dimension_detail(
+                score=process_score,
+                supported=supports_process,
+                observed=observes_process,
+                evidence_sources=["structured_trace", "timeline"],
+                missing_reasons=(
+                    []
+                    if observes_process
+                    else ["trace_or_step_or_tool_signal_missing"]
+                ),
+            ),
+            "tool_efficiency": self._dimension_detail(
+                score=tool_efficiency_score,
+                supported=supports_tool_efficiency,
+                observed=supports_tool_efficiency and observed_tool_trace,
+                evidence_sources=["tool_trace"],
+                missing_reasons=[] if (supports_tool_efficiency and observed_tool_trace) else ["tool_trace_unavailable"],
+            ),
+            "cost_efficiency": self._dimension_detail(
+                score=cost_efficiency_score,
+                supported=supports_provider_cost,
+                observed=supports_provider_cost and (not clear_metrics.cost_is_estimated),
+                evidence_sources=["provider_cost"],
+                missing_reasons=[] if (supports_provider_cost and (not clear_metrics.cost_is_estimated)) else ["provider_cost_unavailable"],
+            ),
+            "token_efficiency": self._dimension_detail(
+                score=token_efficiency_score,
+                supported=supports_token_usage,
+                observed=supports_token_usage and has_token_signal,
+                evidence_sources=["session_stats_tokens"],
+                missing_reasons=[] if (supports_token_usage and has_token_signal) else ["token_usage_unavailable"],
+            ),
+            "trace_quality": self._dimension_detail(
+                score=trace_quality_score,
+                supported=supports_trace_quality,
+                observed=supports_trace_quality and observed_structured_trace,
+                evidence_sources=["trace_signal"],
+                missing_reasons=[] if (supports_trace_quality and observed_structured_trace) else ["structured_trace_unavailable"],
+            ),
         }
 
-        weights_cfg = self.evaluation_settings.get("v2", {}).get("dimension_weights", {})
-        ordered_dims = ["outcome", "process", "efficiency", "robustness", "safety"]
-        weights = {dim: max(0.0, float(weights_cfg.get(dim, 0.0))) for dim in ordered_dims}
-        total_weight = sum(weights.values()) or 1.0
-        raw_score = sum(dimension_scores[dim] * weights[dim] for dim in ordered_dims) / total_weight
+        v2_cfg = self.evaluation_settings.get("v2", {})
+        comparable_dimensions = list(v2_cfg.get("comparable_dimensions", []))
+        diagnostic_dimensions = list(v2_cfg.get("diagnostic_dimensions", []))
+
+        for dimension in comparable_dimensions + diagnostic_dimensions:
+            if dimension in dimension_details:
+                continue
+            dimension_details[dimension] = self._dimension_detail(
+                score=None,
+                supported=False,
+                observed=False,
+                missing_reasons=["dimension_not_implemented"],
+            )
+
+        main_weights = self._get_dimension_weights(comparable_dimensions, "dimension_weights_main")
+        diagnostic_weights = self._get_dimension_weights(diagnostic_dimensions, "dimension_weights_diagnostic")
+        raw_score, score_coverage, main_scores = self._weighted_score_from_details(
+            dimensions=comparable_dimensions,
+            details=dimension_details,
+            weights=main_weights,
+        )
+        diagnostic_score, _, diagnostic_scores = self._weighted_score_from_details(
+            dimensions=diagnostic_dimensions,
+            details=dimension_details,
+            weights=diagnostic_weights,
+        )
+        unknown_dimensions = sorted(
+            dimension
+            for dimension, detail in dimension_details.items()
+            if detail.get("score") is None
+        )
 
         gate_status, cap = self._apply_v2_gates(
             outcome_score=outcome_score,
@@ -1836,16 +2476,27 @@ Please show me the complete process including testing.""",
         )
         is_provisional = evidence_quality.get("high_supervision_coverage", 0.0) < provisional_threshold
 
+        signal_values = {
+            "checker_executed": bool(evidence_quality.get("checker_executed")),
+            "repeated_runs": bool((run_scores and len(run_scores) > 1) or self.runs_per_task > 1),
+            "wall_clock_time": clear_metrics.total_task_time >= 0.0,
+            "structured_trace": observed_structured_trace,
+            "tool_trace": observed_tool_trace,
+            "step_trace": observed_step_trace,
+            "timeline_events": has_timeline_signal,
+            "session_stats": has_session_stats,
+            "provider_cost": bool(supports_provider_cost and (not clear_metrics.cost_is_estimated)),
+            "token_usage": has_token_signal,
+        }
+
         comparability = self._classify_comparability_v2(
             test_case=test_case,
-            clear_metrics=clear_metrics,
+            dimension_details=dimension_details,
             evidence_quality=evidence_quality,
+            signal_values=signal_values,
+            score_coverage=score_coverage,
+            is_provisional=is_provisional,
         )
-        if self.evaluation_settings.get("main_leaderboard_core_suite_only", True) and not test_case.core_comparable:
-            comparability["eligible_for_main_leaderboard"] = False
-
-        if is_provisional:
-            comparability["eligible_for_main_leaderboard"] = False
 
         evidence_quality["policy_hits"] = policy_hits
         evidence_quality["provisional_threshold"] = provisional_threshold
@@ -1853,8 +2504,13 @@ Please show me the complete process including testing.""",
         gate_status["raw_score_before_gate"] = self._clamp01(raw_score)
 
         return {
-            "dimension_scores": {k: self._clamp01(v) for k, v in dimension_scores.items()},
+            "dimension_scores": main_scores,
+            "diagnostic_dimension_scores": diagnostic_scores,
+            "dimension_details": dimension_details,
             "overall_v2_score": self._clamp01(final_score),
+            "overall_v2_diagnostic_score": self._clamp01(diagnostic_score),
+            "unknown_dimensions": unknown_dimensions,
+            "score_coverage": self._clamp01(score_coverage),
             "evidence_quality": evidence_quality,
             "comparability": comparability,
             "gate_status": gate_status,
@@ -2034,9 +2690,13 @@ Please show me the complete process including testing.""",
         pass_rate = sum(run_passes) / run_count
 
         v2_scores = [r.overall_v2_score or r.overall_clear_score for r in run_results]
+        diag_scores = [r.overall_v2_diagnostic_score for r in run_results]
         mean_v2 = statistics.fmean(v2_scores)
         std_v2 = statistics.pstdev(v2_scores) if run_count > 1 else 0.0
         ci95_v2 = 1.96 * std_v2 / (run_count ** 0.5) if run_count > 1 else 0.0
+        mean_diag = statistics.fmean(diag_scores)
+        std_diag = statistics.pstdev(diag_scores) if run_count > 1 else 0.0
+        ci95_diag = 1.96 * std_diag / (run_count ** 0.5) if run_count > 1 else 0.0
 
         eval_overalls = [r.evaluation_result.overall_score for r in run_results]
         eval_conf = [r.evaluation_result.confidence for r in run_results]
@@ -2062,7 +2722,10 @@ Please show me the complete process including testing.""",
         cm.memory_usage_mb = _mean_metric(lambda r: r.clear_metrics.memory_usage_mb)
         cm.cpu_usage_percent = _mean_metric(lambda r: r.clear_metrics.cpu_usage_percent)
         cm.steps_per_second = _mean_metric(lambda r: r.clear_metrics.steps_per_second)
+        cm.trace_signal_quality = _mean_metric(lambda r: r.clear_metrics.trace_signal_quality, default=0.0)
         cm.cost_is_estimated = all(r.clear_metrics.cost_is_estimated for r in run_results)
+        cm.supports_structured_trace = any(r.clear_metrics.supports_structured_trace for r in run_results)
+        cm.time_breakdown_is_estimated = all(r.clear_metrics.time_breakdown_is_estimated for r in run_results)
 
         dim_keys = set().union(*(r.dimension_scores.keys() for r in run_results))
         primary.dimension_scores = {
@@ -2070,20 +2733,68 @@ Please show me the complete process including testing.""",
             for key in dim_keys
         }
 
-        v2_dim_keys = set().union(*(r.v2_dimension_scores.keys() for r in run_results))
-        primary.v2_dimension_scores = {
-            key: _mean_metric(lambda r, k=key: r.v2_dimension_scores.get(k, 0.0))
-            for key in v2_dim_keys
-        }
+        v2_cfg = self.evaluation_settings.get("v2", {})
+        comparable_dimensions = list(v2_cfg.get("comparable_dimensions", []))
+        diagnostic_dimensions = list(v2_cfg.get("diagnostic_dimensions", []))
+        main_weights = self._get_dimension_weights(comparable_dimensions, "dimension_weights_main")
+        diagnostic_weights = self._get_dimension_weights(diagnostic_dimensions, "dimension_weights_diagnostic")
+
+        all_dimensions = set(comparable_dimensions + diagnostic_dimensions)
+        for result in run_results:
+            all_dimensions.update(result.v2_dimension_details.keys())
+
+        aggregated_details: Dict[str, Dict[str, Any]] = {}
+        for dimension in sorted(all_dimensions):
+            dimension_run_details = [r.v2_dimension_details.get(dimension, {}) for r in run_results]
+            observed_scores = [
+                float(detail.get("score"))
+                for detail in dimension_run_details
+                if detail.get("score") is not None
+            ]
+            supported = any(bool(detail.get("supported", False)) for detail in dimension_run_details)
+            evidence_sources: List[str] = []
+            missing_reasons: List[str] = []
+            for detail in dimension_run_details:
+                for source in detail.get("evidence_sources", []) or []:
+                    if source not in evidence_sources:
+                        evidence_sources.append(source)
+                for reason in detail.get("missing_reasons", []) or []:
+                    if reason not in missing_reasons:
+                        missing_reasons.append(reason)
+
+            agg_score: Optional[float] = None
+            if observed_scores:
+                agg_score = self._clamp01(float(statistics.fmean(observed_scores)))
+
+            aggregated_details[dimension] = self._dimension_detail(
+                score=agg_score,
+                supported=supported,
+                observed=agg_score is not None,
+                evidence_sources=evidence_sources,
+                missing_reasons=missing_reasons or (["no_observed_signal"] if agg_score is None else []),
+            )
 
         variability = max(0.0, 1.0 - min(1.0, std_v2 * 2.0))
-        primary.v2_dimension_scores["robustness"] = self._clamp01(pass_rate * 0.6 + variability * 0.4)
+        aggregated_robustness = self._clamp01(pass_rate * 0.6 + variability * 0.4)
+        if "robustness" in aggregated_details:
+            detail = aggregated_details["robustness"]
+            if detail.get("score") is not None:
+                detail["score"] = aggregated_robustness
+                detail["observed"] = True
 
-        weights_cfg = self.evaluation_settings.get("v2", {}).get("dimension_weights", {})
-        ordered_dims = ["outcome", "process", "efficiency", "robustness", "safety"]
-        weights = {dim: max(0.0, float(weights_cfg.get(dim, 0.0))) for dim in ordered_dims}
-        total_weight = sum(weights.values()) or 1.0
-        raw_v2 = sum(primary.v2_dimension_scores.get(dim, 0.0) * weights[dim] for dim in ordered_dims) / total_weight
+        raw_v2, score_coverage, main_scores = self._weighted_score_from_details(
+            dimensions=comparable_dimensions,
+            details=aggregated_details,
+            weights=main_weights,
+        )
+        raw_diag, _, diagnostic_scores_map = self._weighted_score_from_details(
+            dimensions=diagnostic_dimensions,
+            details=aggregated_details,
+            weights=diagnostic_weights,
+        )
+        unknown_dimensions = sorted(
+            dimension for dimension, detail in aggregated_details.items() if detail.get("score") is None
+        )
 
         gate_caps = self.evaluation_settings.get("v2", {}).get("gate_caps", {})
         safety_cap = float(gate_caps.get("safety", 0.20))
@@ -2111,19 +2822,51 @@ Please show me the complete process including testing.""",
             "aggregated_over_runs": run_count,
         }
 
-        cmp_statuses = [r.comparability.get("status", "COMPARABLE") for r in run_results]
-        if "HARD_NON_COMPARABLE" in cmp_statuses:
-            cmp_status = "HARD_NON_COMPARABLE"
-        elif "SOFT_NON_COMPARABLE" in cmp_statuses:
-            cmp_status = "SOFT_NON_COMPARABLE"
-        else:
-            cmp_status = "COMPARABLE"
+        def _worst_status(statuses: List[str]) -> str:
+            if "HARD_NON_COMPARABLE" in statuses:
+                return "HARD_NON_COMPARABLE"
+            if "SOFT_NON_COMPARABLE" in statuses:
+                return "SOFT_NON_COMPARABLE"
+            return "COMPARABLE"
 
-        cmp_reasons: List[str] = []
+        core_statuses = [
+            r.comparability.get("core_status", r.comparability.get("status", "COMPARABLE"))
+            for r in run_results
+        ]
+        full_statuses = [
+            r.comparability.get("full_status", r.comparability.get("status", "COMPARABLE"))
+            for r in run_results
+        ]
+        core_status = _worst_status(core_statuses)
+        full_status = _worst_status(full_statuses)
+
+        core_reasons: List[str] = []
+        full_reasons: List[str] = []
         for result in run_results:
-            for reason in result.comparability.get("reasons", []):
-                if reason not in cmp_reasons:
-                    cmp_reasons.append(reason)
+            for reason in result.comparability.get("core_reasons", result.comparability.get("reasons", [])) or []:
+                if reason not in core_reasons:
+                    core_reasons.append(reason)
+            for reason in result.comparability.get("full_reasons", result.comparability.get("reasons", [])) or []:
+                if reason not in full_reasons:
+                    full_reasons.append(reason)
+
+        dimension_status: Dict[str, str] = {}
+        for dimension in sorted(all_dimensions):
+            detail = aggregated_details.get(dimension, {})
+            if not bool(detail.get("supported", False)):
+                dimension_status[dimension] = "UNSUPPORTED"
+            elif detail.get("score") is None:
+                dimension_status[dimension] = "UNKNOWN"
+            else:
+                dimension_status[dimension] = "COMPARABLE"
+
+        required_signal_keys = set()
+        for result in run_results:
+            required_signal_keys.update((result.comparability.get("required_signal_status") or {}).keys())
+        required_signal_status = {
+            key: all(bool((result.comparability.get("required_signal_status") or {}).get(key, False)) for result in run_results)
+            for key in sorted(required_signal_keys)
+        }
 
         high_coverage_mean = _mean_metric(
             lambda r: r.evidence_quality.get("high_supervision_coverage", 0.0)
@@ -2138,18 +2881,45 @@ Please show me the complete process including testing.""",
         )
         primary.is_provisional = high_coverage_mean < provisional_threshold
 
+        if primary.is_provisional and core_status == "COMPARABLE":
+            core_status = "SOFT_NON_COMPARABLE"
+            if "Run is provisional (high-supervision coverage below threshold)" not in core_reasons:
+                core_reasons.append("Run is provisional (high-supervision coverage below threshold)")
+        if primary.is_provisional and full_status == "COMPARABLE":
+            full_status = "SOFT_NON_COMPARABLE"
+            if "Run is provisional (high-supervision coverage below threshold)" not in full_reasons:
+                full_reasons.append("Run is provisional (high-supervision coverage below threshold)")
+
+        eligible_for_main = (
+            core_status == "COMPARABLE"
+            and (not primary.is_provisional)
+            and (
+                (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
+                or test_case.core_comparable
+            )
+        )
+        eligible_for_full = (
+            full_status == "COMPARABLE"
+            and (not primary.is_provisional)
+            and (
+                (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
+                or test_case.core_comparable
+            )
+        )
+
         primary.comparability = {
-            "status": cmp_status,
-            "reasons": cmp_reasons,
+            "status": core_status,
+            "core_status": core_status,
+            "full_status": full_status,
+            "reasons": core_reasons,
+            "core_reasons": core_reasons,
+            "full_reasons": full_reasons,
             "core_comparable": bool(test_case.core_comparable),
-            "eligible_for_main_leaderboard": (
-                cmp_status == "COMPARABLE"
-                and (not primary.is_provisional)
-                and (
-                    (not self.evaluation_settings.get("main_leaderboard_core_suite_only", True))
-                    or test_case.core_comparable
-                )
-            ),
+            "eligible_for_main_leaderboard": eligible_for_main,
+            "eligible_for_full_leaderboard": eligible_for_full,
+            "dimension_status": dimension_status,
+            "required_signal_status": required_signal_status,
+            "score_coverage": self._clamp01(score_coverage),
         }
 
         primary_tiers = [r.evidence_quality.get("primary_tier", "heuristic") for r in run_results]
@@ -2171,14 +2941,21 @@ Please show me the complete process including testing.""",
             "tier_scores": tier_scores,
             "high_supervision_available": high_coverage_mean > 0.0,
             "high_supervision_coverage": self._clamp01(high_coverage_mean),
-            "checker_executed": high_coverage_mean > 0.0,
+            "checker_executed": any(bool(r.evidence_quality.get("checker_executed")) for r in run_results),
+            "checker_passed": all(bool(r.evidence_quality.get("checker_passed", False)) for r in run_results),
             "include_in_total_score": False,
             "evidence_quality_in_total": False,
             "provisional_threshold": provisional_threshold,
             "aggregated_over_runs": run_count,
         }
 
+        primary.v2_dimension_details = aggregated_details
+        primary.v2_dimension_scores = main_scores
+        primary.v2_diagnostic_dimension_scores = diagnostic_scores_map
+        primary.score_coverage = self._clamp01(score_coverage)
+        primary.unknown_dimensions = unknown_dimensions
         primary.overall_v2_score = self._clamp01(min(raw_v2, final_cap))
+        primary.overall_v2_diagnostic_score = self._clamp01(raw_diag)
         primary.overall_clear_score = primary.overall_v2_score
 
         gate_pass = (
@@ -2186,10 +2963,7 @@ Please show me the complete process including testing.""",
             and primary.gate_status["critical_function_gate"]["status"] == "pass"
             and primary.gate_status["oracle_gate"]["status"] != "fail"
         )
-        primary.passed_all_thresholds = (
-            pass_rate >= 0.67
-            and gate_pass
-        )
+        primary.passed_all_thresholds = pass_rate >= 0.67 and gate_pass
 
         primary.repeat_stats = {
             "run_count": run_count,
@@ -2197,7 +2971,11 @@ Please show me the complete process including testing.""",
             "overall_v2_mean": mean_v2,
             "overall_v2_std": std_v2,
             "overall_v2_ci95": ci95_v2,
+            "overall_v2_diagnostic_mean": mean_diag,
+            "overall_v2_diagnostic_std": std_diag,
+            "overall_v2_diagnostic_ci95": ci95_diag,
             "run_scores": v2_scores,
+            "run_diagnostic_scores": diag_scores,
         }
 
         primary.confidence_score = float(statistics.fmean(eval_conf)) if eval_conf else primary.confidence_score
@@ -2318,9 +3096,14 @@ Please show me the complete process including testing.""",
             "performance": {
                 "overall_clear_score": result.overall_clear_score,
                 "overall_v2_score": result.overall_v2_score,
+                "overall_v2_diagnostic_score": result.overall_v2_diagnostic_score,
                 "passed_thresholds": result.passed_all_thresholds,
                 "dimension_scores": result.dimension_scores,
                 "v2_dimension_scores": result.v2_dimension_scores,
+                "v2_diagnostic_dimension_scores": result.v2_diagnostic_dimension_scores,
+                "v2_dimension_details": result.v2_dimension_details,
+                "unknown_dimensions": result.unknown_dimensions,
+                "score_coverage": result.score_coverage,
             },
             "evidence_quality": result.evidence_quality,
             "comparability": result.comparability,
@@ -2338,6 +3121,18 @@ Please show me the complete process including testing.""",
                 "main_leaderboard_core_suite_only": bool(
                     self.evaluation_settings.get("main_leaderboard_core_suite_only", True)
                 ),
+                "evaluation_agent_id": self.evaluation_settings.get(
+                    "evaluation_agent_id",
+                    self._agent_label(),
+                ),
+                "capability_profile_applied": bool(
+                    self.evaluation_settings.get("capability_profile_applied", False)
+                ),
+                "capability_profile_path": self.evaluation_settings.get("capability_profile_path"),
+                "declared_capabilities": self.evaluation_settings.get("declared_capabilities", {}),
+                "probed_capabilities": self.evaluation_settings.get("probed_capabilities", {}),
+                "trace_parser_profile": self.evaluation_settings.get("trace_parser_profile", {}),
+                "resolved_capabilities": self.resolved_capabilities,
             },
             "timestamp": timestamp
         }
@@ -2357,14 +3152,27 @@ Please show me the complete process including testing.""",
         total_tests = len(results)
         passed_tests = sum(1 for r in results if r.passed_all_thresholds)
         avg_clear_score = sum(r.overall_clear_score for r in results) / total_tests
+        avg_main_v2_score = sum(r.overall_v2_score for r in results) / total_tests
+        avg_diag_v2_score = sum(r.overall_v2_diagnostic_score for r in results) / total_tests
+        avg_score_coverage = sum(r.score_coverage for r in results) / total_tests
         avg_cost = sum(r.clear_metrics.estimated_cost_usd for r in results) / total_tests
         avg_time = sum(r.clear_metrics.total_task_time for r in results) / total_tests
         avg_steps = sum(r.clear_metrics.steps_to_completion for r in results) / total_tests
         avg_accuracy = sum(r.clear_metrics.task_completion_accuracy for r in results) / total_tests
-        comparable_tests = sum(1 for r in results if r.comparability.get("status") == "COMPARABLE")
+        core_comparable_tests = sum(
+            1 for r in results
+            if r.comparability.get("core_status", r.comparability.get("status")) == "COMPARABLE"
+        )
+        full_comparable_tests = sum(
+            1 for r in results
+            if r.comparability.get("full_status", r.comparability.get("status")) == "COMPARABLE"
+        )
         provisional_tests = sum(1 for r in results if r.is_provisional)
         main_eligible_tests = sum(
             1 for r in results if r.comparability.get("eligible_for_main_leaderboard")
+        )
+        full_eligible_tests = sum(
+            1 for r in results if r.comparability.get("eligible_for_full_leaderboard")
         )
         avg_runs_per_task = sum(r.repeat_stats.get("run_count", 1) for r in results) / total_tests
 
@@ -2390,13 +3198,18 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 | Metric | Value | Assessment |
 |--------|-------|------------|
 | **Success Rate** | {passed_tests}/{total_tests} ({passed_tests/total_tests*100:.1f}%) | Overall task completion |
-| **Average CLEAR Score** | {avg_clear_score:.3f}/1.000 | Multi-dimensional performance |
+| **Average CLEAR Score** | {avg_clear_score:.3f}/1.000 | Main comparable score alias |
+| **Average V2 Main Score** | {avg_main_v2_score:.3f}/1.000 | Comparable dimensions only |
+| **Average V2 Diagnostic Score** | {avg_diag_v2_score:.3f}/1.000 | Diagnostic dimensions only |
+| **Average Score Coverage** | {avg_score_coverage:.3f} | Main-dimension observability coverage |
 | **Average Cost per Task** | ${avg_cost:.3f} USD | Economic efficiency |
 | **Average Task Time** | {avg_time:.1f} seconds | Execution speed |
 | **Average Steps** | {avg_steps:.1f} steps | Task efficiency |
 | **Average Accuracy** | {avg_accuracy:.3f}/1.000 | Output quality |
-| **Comparable Tasks** | {comparable_tests}/{total_tests} | Strict cross-agent comparability |
-| **Main Leaderboard Eligible** | {main_eligible_tests}/{total_tests} | Comparable + non-provisional |
+| **Core Comparable Tasks** | {core_comparable_tests}/{total_tests} | Outcome-focused strict comparability |
+| **Full Comparable Tasks** | {full_comparable_tests}/{total_tests} | Process + trace strict comparability |
+| **Main Leaderboard Eligible** | {main_eligible_tests}/{total_tests} | Core comparable + non-provisional |
+| **Full Leaderboard Eligible** | {full_eligible_tests}/{total_tests} | Full comparable + non-provisional |
 | **Provisional Tasks** | {provisional_tests}/{total_tests} | Evidence coverage below threshold |
 | **Average Runs per Task** | {avg_runs_per_task:.1f} | Multi-run robustness protocol |
 
@@ -2431,17 +3244,22 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 
 ## 📋 Detailed Test Results
 
-| Test Case | Category | CLEAR Score | Cost | Time | Steps | Tools | Comparable | Provisional | Status |
-|-----------|----------|-------------|------|------|-------|-------|------------|-------------|--------|
+| Test Case | Category | Main V2 | Diag V2 | Coverage | Cost | Time | Steps | Core Cmp | Full Cmp | Provisional | Status |
+|-----------|----------|---------|---------|----------|------|------|-------|----------|----------|-------------|--------|
 """
         
         for result in results:
             status = "✅ PASS" if result.passed_all_thresholds else "❌ FAIL"
-            tools_str = ", ".join(result.tools_used[:3]) + ("..." if len(result.tools_used) > 3 else "")
-            
-            comparable = result.comparability.get("status", "UNKNOWN")
+            core_cmp = result.comparability.get("core_status", result.comparability.get("status", "UNKNOWN"))
+            full_cmp = result.comparability.get("full_status", result.comparability.get("status", "UNKNOWN"))
             provisional = "yes" if result.is_provisional else "no"
-            report += f"| {result.test_case.name} | {result.test_case.category} | {result.overall_clear_score:.3f} | ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s | {result.clear_metrics.steps_to_completion} | {tools_str} | {comparable} | {provisional} | {status} |\n"
+            report += (
+                f"| {result.test_case.name} | {result.test_case.category} "
+                f"| {result.overall_v2_score:.3f} | {result.overall_v2_diagnostic_score:.3f} "
+                f"| {result.score_coverage:.2f} "
+                f"| ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s "
+                f"| {result.clear_metrics.steps_to_completion} | {core_cmp} | {full_cmp} | {provisional} | {status} |\n"
+            )
 
         # ── Execution Time Breakdown ──────────────────────────────────────────
         report += f"""
@@ -2590,10 +3408,41 @@ position in the log against wall-clock timestamps captured by the resource monit
         
         with open(report_path, 'w') as f:
             f.write(report)
+
+        core_leaderboard_path = self.results_dir / f"{self._artifact_prefix()}_leaderboard_core_{timestamp}.csv"
+        full_leaderboard_path = self.results_dir / f"{self._artifact_prefix()}_leaderboard_full_{timestamp}.csv"
+        with open(core_leaderboard_path, "w", newline="", encoding="utf-8") as core_file:
+            writer = csv.writer(core_file)
+            writer.writerow(["test_case", "main_v2_score", "core_status", "eligible_for_main_leaderboard", "is_provisional"])
+            for result in results:
+                writer.writerow(
+                    [
+                        result.test_case.name,
+                        f"{result.overall_v2_score:.6f}",
+                        result.comparability.get("core_status", result.comparability.get("status", "UNKNOWN")),
+                        bool(result.comparability.get("eligible_for_main_leaderboard", False)),
+                        bool(result.is_provisional),
+                    ]
+                )
+        with open(full_leaderboard_path, "w", newline="", encoding="utf-8") as full_file:
+            writer = csv.writer(full_file)
+            writer.writerow(["test_case", "diagnostic_v2_score", "full_status", "eligible_for_full_leaderboard", "is_provisional"])
+            for result in results:
+                writer.writerow(
+                    [
+                        result.test_case.name,
+                        f"{result.overall_v2_diagnostic_score:.6f}",
+                        result.comparability.get("full_status", result.comparability.get("status", "UNKNOWN")),
+                        bool(result.comparability.get("eligible_for_full_leaderboard", False)),
+                        bool(result.is_provisional),
+                    ]
+                )
         
         print(f"\n📊 Agent evaluation complete!")
         print(f"📄 Report: {report_path}")
         print(f"📁 Results: {self.results_dir}")
+        print(f"📊 Core Leaderboard: {core_leaderboard_path}")
+        print(f"📊 Full Leaderboard: {full_leaderboard_path}")
         
         # Console summary
         print("\n" + "=" * 80)
@@ -2601,6 +3450,7 @@ position in the log against wall-clock timestamps captured by the resource monit
         print("=" * 80)
         print(f"Success Rate: {passed_tests}/{total_tests} ({passed_tests/total_tests*100:.1f}%)")
         print(f"CLEAR Score: {avg_clear_score:.3f}/1.000")
+        print(f"Core Comparable: {core_comparable_tests}/{total_tests} | Full Comparable: {full_comparable_tests}/{total_tests}")
         print(f"Avg Cost: ${avg_cost:.3f} | Avg Time: {avg_time:.1f}s | Avg Steps: {avg_steps:.1f}")
         print("=" * 80)
 
@@ -2655,6 +3505,21 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default=None,
         help="Repeatable raw arg appended to Continue CLI command.",
     )
+    parser.add_argument(
+        "--probe-agent",
+        action="store_true",
+        help="Run capability probe for the selected --agent before evaluation.",
+    )
+    parser.add_argument(
+        "--probe-only",
+        action="store_true",
+        help="Run capability probe and exit without running evaluation tasks.",
+    )
+    parser.add_argument(
+        "--refresh-capability-profile",
+        action="store_true",
+        help="Force refreshing capability profile even if one already exists.",
+    )
     return parser
 
 
@@ -2662,9 +3527,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 async def main(argv: Optional[List[str]] = None):
     """Main execution function"""
     args = _build_arg_parser().parse_args(argv)
-    evaluation_settings, evaluation_source = resolve_evaluation_settings(
+    base_evaluation_settings, evaluation_source = resolve_evaluation_settings(
         config_path=getattr(args, "agent_config", None),
         script_name="phase3",
+        agent=getattr(args, "agent", None),
+        use_capability_profile=False,
     )
     results_dir, adapter_kwargs, config_source = resolve_script_runtime_options(
         args=args,
@@ -2675,6 +3542,49 @@ async def main(argv: Optional[List[str]] = None):
         agent=args.agent,
         **adapter_kwargs,
     )
+
+    probe_cfg = base_evaluation_settings.get("v2", {}).get("capability_probe", {})
+    if not isinstance(probe_cfg, dict):
+        probe_cfg = {}
+    probe_enabled_by_config = bool(probe_cfg.get("enabled", False))
+    probe_auto_refresh = bool(probe_cfg.get("auto_refresh", False))
+    evaluation_settings = base_evaluation_settings
+    profile_path = Path(
+        base_evaluation_settings.get(
+            "capability_profile_path",
+            str(Path("artifacts/capability_profiles") / f"{adapter.agent_id}.json"),
+        )
+    )
+    profile_exists = profile_path.exists()
+    should_probe = bool(args.probe_agent or args.probe_only or args.refresh_capability_profile) or (
+        probe_enabled_by_config
+        and (probe_auto_refresh or (not profile_exists))
+    )
+    if should_probe:
+        profile = run_capability_probe(
+            adapter=adapter,
+            agent_id=base_evaluation_settings.get("evaluation_agent_id", adapter.agent_id),
+            declared_capabilities=base_evaluation_settings.get("declared_capabilities", {}),
+            profile_dir=str(profile_path.parent),
+        )
+        print(f"🔎 Capability probe complete: {profile_path}")
+        print(f"   Resolved capabilities: {profile.get('resolved_capabilities', {})}")
+    use_capability_profile = bool(
+        args.probe_agent
+        or args.probe_only
+        or args.refresh_capability_profile
+        or probe_enabled_by_config
+    )
+    if use_capability_profile:
+        evaluation_settings, evaluation_source = resolve_evaluation_settings(
+            config_path=getattr(args, "agent_config", None),
+            script_name="phase3",
+            agent=getattr(args, "agent", None),
+            use_capability_profile=True,
+        )
+    if args.probe_only:
+        print("🧪 Probe-only mode complete. No evaluation run executed.")
+        return
 
     print("🚀 Starting CLEAR Framework Evaluation")
     print("🎯 Focus: agent capabilities with pluggable runtime integration")

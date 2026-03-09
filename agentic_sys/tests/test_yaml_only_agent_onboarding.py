@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
-from agent_runtime.script_config import resolve_script_runtime_options
+from agent_runtime.script_config import resolve_evaluation_settings, resolve_script_runtime_options
 
 
 class YamlOnlyAgentOnboardingTests(unittest.TestCase):
@@ -64,6 +64,38 @@ agents:
         self.assertTrue(execution.success)
         self.assertEqual(execution.return_code, 0)
         self.assertIn("yaml-only-onboarding", execution.stdout)
+
+    def test_custom_agent_capabilities_are_loaded_from_yaml_only(self):
+        config_yaml = """
+evaluation:
+  v2:
+    capability_probe:
+      profile_dir: artifacts/capability_profiles
+agents:
+  echo-agent:
+    aliases: [echo]
+    evaluation_capabilities:
+      structured_trace: false
+      tool_trace: false
+      step_trace: false
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "agent_profiles.yaml"
+            cfg.write_text(config_yaml, encoding="utf-8")
+            settings, _ = resolve_evaluation_settings(
+                config_path=str(cfg),
+                script_name="phase3",
+                agent="echo",
+            )
+
+        self.assertEqual(settings["evaluation_agent_id"], "echo-agent")
+        self.assertFalse(settings["resolved_capabilities"]["structured_trace"])
+        self.assertTrue(settings["resolved_capabilities"]["checker_support"]["exit_code"])
 
 
 if __name__ == "__main__":

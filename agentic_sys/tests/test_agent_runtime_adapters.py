@@ -10,7 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agent_runtime.adapters import ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
-from agent_runtime.models import AgentExecutionRequest
+from agent_runtime.models import AgentExecutionRequest, AgentExecutionResult
 
 
 class MiniAgentAdapterTests(unittest.TestCase):
@@ -80,6 +80,54 @@ class MiniAgentAdapterTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("Execution error", result.stderr)
 
+    def test_run_uses_pty_transport_when_configured(self):
+        adapter = MiniAgentAdapter(executable="mini-agent", transport="pty")
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["mini-agent", "--workspace", "/tmp/ws", "--task", "task"],
+            stdout="out",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.5,
+            return_code=0,
+            pid=777,
+            metadata={"transport": "pty", "merged_output": True},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pty", return_value=fake_result) as pty_runner:
+            result = adapter.run(request)
+
+        self.assertEqual(result.metadata.get("transport"), "pty")
+        pty_runner.assert_called_once()
+
+    def test_run_appends_trace_log_chunks_to_metadata(self):
+        adapter = MiniAgentAdapter(
+            executable="mini-agent",
+            trace_log_paths=["{workspace}/logs/agent.log"],
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["mini-agent", "--workspace", "/tmp/ws", "--task", "task"],
+            stdout="out",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.5,
+            return_code=0,
+            pid=777,
+            metadata={"transport": "pipe"},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch(
+                 "agent_runtime.adapters._capture_trace_log_chunks",
+                 return_value=[{"path": "/tmp/ws/logs/agent.log", "text": "trace-line"}],
+             ):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(result.metadata["trace_log_paths"], ["/tmp/ws/logs/agent.log"])
+
     def test_auto_detect_prefers_path_lookup(self):
         with patch("agent_runtime.adapters.shutil.which", return_value="/usr/local/bin/mini-agent"):
             adapter = MiniAgentAdapter.auto_detect()
@@ -131,9 +179,9 @@ class ContinueCnAdapterTests(unittest.TestCase):
                 "read",
                 "--allow",
                 "edit",
+                "--auto",
                 "-p",
                 "do work",
-                "--auto",
             ],
         )
 
@@ -227,8 +275,145 @@ class ContinueCnAdapterTests(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertIn("credits are exhausted", result.stderr)
 
+    def test_run_uses_pty_transport_when_configured(self):
+        adapter = ContinueCnAdapter(executable="cn", transport="pty")
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["cn", "-p", "task"],
+            stdout="trace output",
+            stderr="",
+            success=False,
+            execution_time_seconds=0.6,
+            return_code=1,
+            pid=778,
+            metadata={"transport": "pty", "merged_output": True},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pty", return_value=fake_result) as pty_runner:
+            result = adapter.run(request)
+
+        self.assertEqual(result.metadata.get("transport"), "pty")
+        self.assertTrue(
+            ("Hint:" in result.stderr) or (result.stderr == "")
+        )
+        pty_runner.assert_called_once()
+
+    def test_run_collects_trace_logs_when_configured(self):
+        adapter = ContinueCnAdapter(
+            executable="cn",
+            trace_log_paths=["~/.continue/logs/cn.log"],
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["cn", "-p", "task"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.6,
+            return_code=0,
+            pid=778,
+            metadata={"transport": "pipe"},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch(
+                 "agent_runtime.adapters._capture_trace_log_chunks",
+                 return_value=[{"path": "/Users/x/.continue/logs/cn.log", "text": "trace-line"}],
+             ):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(result.metadata["trace_log_paths"], ["/Users/x/.continue/logs/cn.log"])
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "delta")
+
+    def test_run_uses_workspace_filtered_fallback_tail_when_delta_empty(self):
+        adapter = ContinueCnAdapter(
+            executable="cn",
+            trace_log_paths=["~/.continue/logs/cn.log"],
+        )
+        request = AgentExecutionRequest(
+            task_prompt="task",
+            workspace="/tmp/ws_123",
+            timeout_seconds=30,
+        )
+        fake_result = AgentExecutionResult(
+            command=["cn", "-p", "task"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.6,
+            return_code=0,
+            pid=778,
+            metadata={"transport": "pipe"},
+        )
+
+        fallback_chunks = [
+            {"path": "/Users/x/.continue/logs/cn.log", "text": "old unrelated line"},
+            {
+                "path": "/Users/x/.continue/logs/cn.log",
+                "text": 'Executing tool {"toolName":"Write","arguments":{"filepath":"/private/tmp/ws_123/a.txt"}}',
+            },
+        ]
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch("agent_runtime.adapters._capture_trace_log_chunks", return_value=[]), \
+             patch("agent_runtime.adapters._capture_trace_log_tail", return_value=fallback_chunks):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(len(result.metadata["trace_log_chunks"]), 1)
+        self.assertIn("ws_123", result.metadata["trace_log_chunks"][0]["text"])
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback")
+
+    def test_workspace_filter_prefers_strong_path_match_over_weak_basename_match(self):
+        adapter = ContinueCnAdapter(
+            executable="cn",
+            trace_log_paths=["~/.continue/logs/cn.log"],
+        )
+        request = AgentExecutionRequest(
+            task_prompt="task",
+            workspace="/tmp/tmp",
+            timeout_seconds=30,
+        )
+        fake_result = AgentExecutionResult(
+            command=["cn", "-p", "task"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.6,
+            return_code=0,
+            pid=778,
+            metadata={"transport": "pipe"},
+        )
+        fallback_chunks = [
+            {
+                "path": "/Users/x/.continue/logs/cn.log",
+                "text": 'tool {"toolName":"Write","arguments":{"filepath":"/private/tmp/other/a.txt"}}',
+            },
+            {
+                "path": "/Users/x/.continue/logs/cn.log",
+                "text": 'tool {"toolName":"Write","arguments":{"filepath":"/private/tmp/tmp/b.txt"}}',
+            },
+        ]
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch("agent_runtime.adapters._capture_trace_log_chunks", return_value=[]), \
+             patch("agent_runtime.adapters._capture_trace_log_tail", return_value=fallback_chunks):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(len(result.metadata["trace_log_chunks"]), 1)
+        self.assertIn("/private/tmp/tmp/b.txt", result.metadata["trace_log_chunks"][0]["text"])
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback")
+
 
 class GenericCLIAdapterTests(unittest.TestCase):
+    def test_invalid_transport_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            GenericCLIAdapter(agent_id="a", command=["/bin/echo", "{task_prompt}"], transport="unknown")
+
     def test_build_command_renders_templates(self):
         adapter = GenericCLIAdapter(
             agent_id="my-agent",
@@ -307,6 +492,93 @@ class GenericCLIAdapterTests(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.return_code, 0)
         self.assertIn("hello-world", result.stdout.strip())
+
+    def test_run_uses_pty_transport_when_configured(self):
+        adapter = GenericCLIAdapter(
+            agent_id="my-agent",
+            command=["my-agent", "{task_prompt}"],
+            transport="pty",
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["my-agent", "task"],
+            stdout="out",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.7,
+            return_code=0,
+            pid=779,
+            metadata={"transport": "pty", "merged_output": True},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pty", return_value=fake_result) as pty_runner:
+            result = adapter.run(request)
+
+        self.assertEqual(result.metadata.get("transport"), "pty")
+        pty_runner.assert_called_once()
+
+    def test_generic_adapter_collects_trace_logs_when_configured(self):
+        adapter = GenericCLIAdapter(
+            agent_id="my-agent",
+            command=["my-agent", "{task_prompt}"],
+            trace_log_paths=["{workspace}/logs/agent.log"],
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["my-agent", "task"],
+            stdout="out",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.7,
+            return_code=0,
+            pid=779,
+            metadata={"transport": "pipe"},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch(
+                 "agent_runtime.adapters._capture_trace_log_chunks",
+                 return_value=[{"path": "/tmp/ws/logs/agent.log", "text": "trace-line"}],
+             ):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(result.metadata["trace_log_paths"], ["/tmp/ws/logs/agent.log"])
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "delta")
+
+    def test_generic_adapter_uses_filtered_fallback_tail_when_delta_empty(self):
+        adapter = GenericCLIAdapter(
+            agent_id="my-agent",
+            command=["my-agent", "{task_prompt}"],
+            trace_log_paths=["{workspace}/logs/agent.log"],
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws_abc", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["my-agent", "task"],
+            stdout="out",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.7,
+            return_code=0,
+            pid=779,
+            metadata={"transport": "pipe"},
+        )
+        fallback_chunks = [
+            {"path": "/tmp/ws_abc/logs/agent.log", "text": "unrelated line"},
+            {"path": "/tmp/ws_abc/logs/agent.log", "text": "write /private/tmp/ws_abc/out.txt"},
+        ]
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch("agent_runtime.adapters._capture_trace_log_chunks", return_value=[]), \
+             patch("agent_runtime.adapters._capture_trace_log_tail", return_value=fallback_chunks):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(len(result.metadata["trace_log_chunks"]), 1)
+        self.assertIn("ws_abc", result.metadata["trace_log_chunks"][0]["text"])
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback")
 
 
 if __name__ == "__main__":

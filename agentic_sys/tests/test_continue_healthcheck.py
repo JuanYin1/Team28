@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 from agent_runtime.continue_healthcheck import (
     diagnose_continue_result,
     run_continue_healthcheck,
+    run_continue_login,
 )
 from agent_runtime.models import AgentExecutionResult
 
@@ -39,6 +40,17 @@ class ContinueHealthcheckTests(unittest.TestCase):
         )
         self.assertEqual(diagnose_continue_result(result), "auth_or_model_not_configured")
 
+    def test_diagnose_interceptor_error_from_stdout_json(self):
+        result = AgentExecutionResult(
+            command=["cn", "-p", "ok"],
+            stdout='{"status":"error","message":"The request failed and the interceptors did not return an alternative response"}',
+            stderr="",
+            success=False,
+            execution_time_seconds=1.0,
+            return_code=1,
+        )
+        self.assertEqual(diagnose_continue_result(result), "auth_or_model_not_configured")
+
     def test_diagnose_credit_exhaustion(self):
         result = AgentExecutionResult(
             command=["cn", "-p", "ok"],
@@ -56,6 +68,39 @@ class ContinueHealthcheckTests(unittest.TestCase):
 
         self.assertFalse(report.success)
         self.assertEqual(report.diagnosis, "binary_not_found")
+
+    def test_run_continue_login_treats_ttyless_post_login_error_as_success(self):
+        fake_completed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 1,
+                "stdout": "✅ Success!\nSuccessfully logged in!\nStarting Continue CLI...",
+                "stderr": "Fatal error: Cannot start TUI in TTY-less environment.",
+            },
+        )()
+        with patch("agent_runtime.continue_healthcheck.subprocess.run", return_value=fake_completed):
+            report = run_continue_login(executable="cn", timeout_seconds=10)
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.diagnosis, "ok")
+        self.assertEqual(report.return_code, 1)
+
+    def test_run_continue_login_detects_network_error(self):
+        fake_completed = type(
+            "Completed",
+            (),
+            {
+                "returncode": 1,
+                "stdout": "Device authorization error: fetch failed",
+                "stderr": "",
+            },
+        )()
+        with patch("agent_runtime.continue_healthcheck.subprocess.run", return_value=fake_completed):
+            report = run_continue_login(executable="cn", timeout_seconds=10)
+
+        self.assertFalse(report.success)
+        self.assertEqual(report.diagnosis, "network_or_proxy_error")
 
 
 @unittest.skipUnless(

@@ -11,11 +11,55 @@ evaluation:
     evidence_quality:
       include_in_total_score: false
       provisional_if_below_high_supervision_coverage: 0.40
+    comparable_dimensions:
+      - outcome
+      - safety
+      - robustness
+      - basic_efficiency
+    diagnostic_dimensions:
+      - process
+      - tool_efficiency
+      - cost_efficiency
+      - token_efficiency
+      - trace_quality
+    required_signals_for_comparable:
+      outcome:
+        - checker_executed
+      safety:
+        - checker_executed
+      robustness:
+        - repeated_runs
+      basic_efficiency:
+        - wall_clock_time
+    dimension_weights_main:
+      outcome: 0.45
+      safety: 0.20
+      robustness: 0.20
+      basic_efficiency: 0.15
+    dimension_weights_diagnostic:
+      process: 0.40
+      tool_efficiency: 0.20
+      cost_efficiency: 0.15
+      token_efficiency: 0.15
+      trace_quality: 0.10
+    full_comparability:
+      required_signals:
+        - structured_trace
+        - tool_trace
+        - step_trace
+        - timeline_events
+      required_dimensions:
+        - process
+        - tool_efficiency
+        - trace_quality
     comparability:
       hard_requirements:
         checker_must_run: true
-      soft_requirements:
-        structured_trace_preferred: true
+      minimum_score_coverage_for_comparable: 1.0
+    capability_probe:
+      enabled: false
+      auto_refresh: false
+      profile_dir: artifacts/capability_profiles
     normalization:
       mode: task_family_baseline
       baseline_by_task_type:
@@ -66,6 +110,42 @@ agents:
       executable:
       conda_env:
       extra_args: []
+    evaluation_capabilities:
+      structured_trace: true
+      tool_trace: true
+      step_trace: true
+      timeline_events: true
+      session_stats: true
+      provider_cost: true
+      token_usage: true
+      skills_runtime: true
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true
+    evaluation_trace_parser:
+      tool_call_patterns:
+        - "🔧 Tool Call: ([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+        - "Tool Call: ([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+        - "\"name\":\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+        - "\"tool(?:_name|Name)\":\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+      step_patterns:
+        - "Step (\\d+)/\\d+"
+      thinking_patterns:
+        - "🧠 Thinking:"
+      assistant_patterns:
+        - "🤖 Assistant:"
+      error_patterns:
+        - "❌|✗ Error"
+      tool_result_patterns:
+        - "(?:✓|✅)\\s*Result"
+      log_file_patterns:
+        - "📝 Log file: (.+\\.log)"
+        - "(?i)log file:\\s*(.+\\.log)"
+      detailed_log_tool_patterns:
+        - "\"tool_name\":\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+        - "function\":\\s*\\{\\s*\"name\":\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
 
   continue:
     aliases: [continue-cn, cn]
@@ -80,6 +160,10 @@ agents:
         results_dir: artifacts/continue/phase3/single_test
     adapter:
       type: continue-cn
+      transport: pty
+      trace_log_paths:
+        - ~/.continue/logs/cn.log
+      trace_log_tail_lines: 1200
       executable:
       agent_name:
       config_path: continuedev/default-cli-config
@@ -87,9 +171,50 @@ agents:
         - anthropic/claude-haiku-4-5
       allow_policies: []
       extra_args:
+        - --verbose
         - --org
         - zhiruis-workspace-2
         - --auto
+    evaluation_capabilities:
+      structured_trace: false
+      tool_trace: false
+      step_trace: false
+      timeline_events: false
+      session_stats: false
+      provider_cost: false
+      token_usage: false
+      skills_runtime: false
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true
+    evaluation_trace_parser:
+      tool_call_patterns:
+        - "\"toolName\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+        - "\"function\"\\s*:\\s*\\{\\s*\"name\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+        - "(?i)tool\\s*call\\s*[:：]\\s*([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+      step_patterns:
+        - "(?:\\bStep\\s+(\\d+)\\b|\"step\"\\s*:\\s*(\\d+)|^\\s*(\\d+)\\.)"
+      thinking_patterns:
+        - "(?i)^\\s*(thinking|reasoning)\\s*[:：]"
+      assistant_patterns:
+        - "(?i)^\\s*(assistant|final)\\s*[:：]"
+      error_patterns:
+        - "(?i)(error|traceback|exception|failed)"
+      tool_result_patterns:
+        - "(?i)(tool result|result\\s*[:：]|completed)"
+      log_file_patterns:
+        - "(?i)log file:\\s*(.+\\.log)"
+      detailed_log_tool_patterns:
+        - "\"toolName\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+        - "\"function\"\\s*:\\s*\\{\\s*\"name\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+      tool_aliases:
+        Write: write_file
+        Read: read_file
+        Bash: bash
+        MultiEdit: edit_file
+        Edit: edit_file
 
   # Example: add a new agent with YAML only (no adapter/registry code changes).
   example-generic:
@@ -107,6 +232,7 @@ agents:
       type: generic-cli
       agent_id: example-generic
       process_name_hint: example-agent
+      transport: pipe
       command:
         - example-agent
         - --workspace
@@ -117,3 +243,17 @@ agents:
       env: {}
       cwd: "{workspace}"
       success_codes: [0]
+    evaluation_capabilities:
+      structured_trace: false
+      tool_trace: false
+      step_trace: false
+      timeline_events: false
+      session_stats: false
+      provider_cost: false
+      token_usage: false
+      skills_runtime: false
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true

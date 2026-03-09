@@ -1,24 +1,28 @@
-# New Agent Onboarding (Step-by-Step)
+# New Agent Onboarding (YAML-Only, Comparable by Design)
 
-This guide shows teammates how to add a new agent to this repo.
-Goal: only edit `config/config.yaml`, no Python adapter code.
+This guide answers two questions:
+1. New agent接入到底要改什么？
+2. 怎么保证接入后在 V2 里可比、鲁棒、且不侵入核心评测逻辑？
 
-## 1) Before you start
+## 1) Minimum Goal
 
-Your agent CLI must support non-interactive runs:
-- accepts task/prompt input,
-- exits with stable return code,
-- prints useful stdout/stderr.
+For normal onboarding, only edit `config/config.yaml`:
+- `agents.<new_agent>.adapter`
+- `agents.<new_agent>.evaluation_capabilities`
+- `agents.<new_agent>.evaluation_trace_parser` (recommended for full comparability)
+- `agents.<new_agent>.scripts.*.results_dir`
 
-## 2) Open project
+No evaluator scoring code changes should be required.
 
-```bash
-cd agentic_sys
-```
+## 2) Runtime Preconditions
 
-## 3) Add a new profile in `config/config.yaml`
+Your CLI must support non-interactive execution:
+- accepts task input from command args
+- deterministic exit codes
+- readable stdout/stderr
+- optional: structured logs in file/console for tool/step/timeline extraction
 
-Copy this template and replace names/command:
+## 3) YAML Template (Copy/Paste)
 
 ```yaml
 agents:
@@ -33,10 +37,12 @@ agents:
         results_dir: artifacts/my-agent/phase3
       run_single_test:
         results_dir: artifacts/my-agent/phase3/single_test
+
     adapter:
       type: generic-cli
       agent_id: my-agent
       process_name_hint: my-agent
+      transport: pipe
       command:
         - my-agent
         - --workspace
@@ -47,31 +53,83 @@ agents:
       env: {}
       cwd: "{workspace}"
       success_codes: [0]
+      trace_log_paths: []
+      trace_log_tail_lines: 800
+      trace_log_max_bytes: 512000
+
+    evaluation_capabilities:
+      structured_trace: false
+      tool_trace: false
+      step_trace: false
+      timeline_events: false
+      session_stats: false
+      provider_cost: false
+      token_usage: false
+      skills_runtime: false
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true
+
+    evaluation_trace_parser:
+      tool_call_patterns:
+        - "\"tool(?:Name|_name)\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+      step_patterns:
+        - "(?:\\bStep\\s+(\\d+)\\b|\"step\"\\s*:\\s*(\\d+))"
+      log_file_patterns:
+        - "(?i)log file:\\s*(.+\\.log)"
 ```
 
-## 4) Required fields
+## 4) Fields You Must Understand
 
-These must exist:
-- `adapter.type: generic-cli`
-- `adapter.command`
+### 4.1 `adapter`
+- `type`:
+  - `generic-cli`: preferred for new agents.
+  - `continue-cn`/`mini-agent`: built-in adapters.
+- `transport`:
+  - `pipe`: default.
+  - `pty`: use when CLI only emits rich trace in TTY mode.
+- `trace_log_paths`:
+  - supplemental logs (e.g. `~/.continue/logs/cn.log`) injected into evaluator parsing path.
 
-## 5) Useful optional fields
+### 4.2 `evaluation_capabilities`
+Declares expected observability. This affects which dimensions can be supported/observed.
 
-- `aliases`: short names for `--agent`
-- `scripts.*.results_dir`: separate outputs by agent
-- `process_name_hint`: better process monitoring in phase2/phase3
-- `success_codes`: include all success return codes your CLI uses
+### 4.3 `evaluation_trace_parser`
+Regex extractor for runtime-specific logs.
+If parser quality is weak, full comparability usually drops even if task outcomes pass.
 
-## 6) Supported placeholders
+## 5) Continue Workflow (Headless + `cn.log`)
 
-You can use these in `command`, `cwd`, `env`, `extra_args`:
-- `{workspace}`
-- `{task_prompt}`
-- `{timeout_seconds}`
+Recommended config shape:
 
-## 7) Validate the new agent
+```yaml
+adapter:
+  type: continue-cn
+  transport: pty
+  trace_log_paths: [~/.continue/logs/cn.log]
+  trace_log_tail_lines: 1200
+  config_path: continuedev/default-cli-config
+  model_slugs: [anthropic/claude-haiku-4-5]
+  extra_args: [--verbose, --org, <org>, --auto]
+```
 
-Run in this order:
+Why:
+- headless output can be sparse;
+- `cn.log` often contains tool/timeline/session internals needed for process scoring.
+
+## 6) Comparability Checklist (Before Claiming Fair Comparison)
+
+Run outputs must show:
+- `Core Comparable Tasks = 4/4` for core suite
+- `Full Comparable Tasks = 4/4` if you claim full process comparability
+- `Main/Full Leaderboard Eligible` aligned with above
+- `unknown_dimensions` understood and acceptable
+
+If only core comparable is satisfied, only claim outcome-level fairness.
+
+## 7) Validation Commands
 
 ```bash
 python run_single_test.py --agent my-agent
@@ -80,69 +138,28 @@ python enhanced_comprehensive_evaluation.py --agent my-agent
 python clear_evaluation_system.py --agent my-agent
 ```
 
-Alias example:
+Optional probe flow:
 
 ```bash
-python run_single_test.py --agent my
+python clear_evaluation_system.py --agent my-agent --probe-agent
+python clear_evaluation_system.py --agent my-agent --probe-only
 ```
 
-## 8) Temporary overrides without editing YAML
-
-```bash
-python run_single_test.py \
-  --agent my-agent \
-  --adapter-option 'extra_args=["--verbose"]' \
-  --adapter-option 'env={"MY_FLAG":"1"}'
-```
-
-## 9) Continue-specific example
-
-If onboarding Continue in team workspace mode:
-
-```yaml
-adapter:
-  type: continue-cn
-  config_path: continuedev/default-cli-config
-  model_slugs: [anthropic/claude-haiku-4-5]
-  extra_args: [--org, zhiruis-workspace-2, --auto]
-```
-
-If using API key mode, teammate also sets:
-
-```bash
-export CONTINUE_API_KEY="<ORG_SCOPED_KEY>"
-```
-
-## 10) Troubleshooting
+## 8) Debugging Quick Map
 
 - `Unsupported agent ...`
-  - profile name/alias does not match `--agent`.
+  - alias/profile mismatch in YAML.
 - `Execution error: [Errno 2] ...`
-  - command executable not found.
-- `Unsupported placeholder ...`
-  - only `{workspace}`, `{task_prompt}`, `{timeout_seconds}` are valid.
-- Phase3 metrics look coarse
-  - runtime has no structured trace; phase3 uses coarse attribution mode.
+  - executable not found.
+- `Full Comparable = 0/N`
+  - parser/capability signals missing, not necessarily outcome failure.
+- high score but wrong comparability interpretation
+  - check `comparability.core_status/full_status` instead of only `overall_v2_score`.
 
-## 11) Team handoff checklist
-
-1. Profile added in `config/config.yaml`.
-2. Smoke test passed (`run_single_test.py`).
-3. Phase1/Phase2/Phase3 run end-to-end.
-4. Output directories are agent-specific.
-5. Required secrets are documented and shared securely.
-6. Unit tests pass at minimum.
-
-## 12) Unit Tests (Required)
-
-Run before handing off:
+## 9) Unit Test Gate (Required)
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-If you are at repo root:
-
-```bash
-python -m unittest discover -s agentic_sys/tests
-```
+This is mandatory before merge for config-only onboarding claims.
