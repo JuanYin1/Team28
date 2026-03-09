@@ -763,6 +763,145 @@ class AgentV2ScoringTests(unittest.TestCase):
 
         self.assertNotIn("skills_usage", [t.category for t in tests])
 
+    def test_comparability_classifies_hard_and_soft_non_comparable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        core_case = AgentTestCase(
+            name="core_case",
+            category="analysis",
+            description="d",
+            task_prompt="p",
+            evaluation_criteria=AgentTestCriteria(),
+            core_comparable=True,
+        )
+        runtime_ext_case = AgentTestCase(
+            name="ext_case",
+            category="skills_usage",
+            description="d",
+            task_prompt="p",
+            evaluation_criteria=AgentTestCriteria(),
+            core_comparable=False,
+        )
+
+        hard_cmp = evaluator._classify_comparability_v2(
+            test_case=core_case,
+            clear_metrics=AgentCLEARMetrics(supports_structured_trace=True),
+            evidence_quality={"checker_executed": False, "primary_tier": "exact"},
+        )
+        self.assertEqual(hard_cmp["status"], "HARD_NON_COMPARABLE")
+        self.assertFalse(hard_cmp["eligible_for_main_leaderboard"])
+
+        soft_cmp = evaluator._classify_comparability_v2(
+            test_case=runtime_ext_case,
+            clear_metrics=AgentCLEARMetrics(supports_structured_trace=False),
+            evidence_quality={"checker_executed": True, "primary_tier": "heuristic"},
+        )
+        self.assertEqual(soft_cmp["status"], "SOFT_NON_COMPARABLE")
+        self.assertFalse(soft_cmp["eligible_for_main_leaderboard"])
+        self.assertTrue(any("Structured trace unavailable" in r for r in soft_cmp["reasons"]))
+
+    def test_provisional_run_is_excluded_from_main_leaderboard(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={
+                    "minimum_high_supervision_coverage": 0.40,
+                    "v2": {
+                        "evidence_quality": {
+                            "provisional_if_below_high_supervision_coverage": 0.40,
+                        },
+                    },
+                },
+            )
+
+        test_case = AgentTestCase(
+            name="case",
+            category="analysis",
+            description="d",
+            task_prompt="p",
+            evaluation_criteria=AgentTestCriteria(),
+            core_comparable=True,
+        )
+        clear_metrics = AgentCLEARMetrics(
+            execution_success_rate=1.0,
+            supports_structured_trace=True,
+        )
+        eval_result = EvaluationResult(overall_score=0.9, correctness_score=0.9)
+        log_analysis = {"raw_text": "", "detailed_timeline": [], "total_steps": 1}
+
+        with patch.object(
+            evaluator,
+            "_calculate_outcome_dimension_v2",
+            return_value=(
+                0.9,
+                {
+                    "primary_tier": "exact",
+                    "tier_scores": {"exact": 0.9},
+                    "high_supervision_available": True,
+                    "high_supervision_score": 0.9,
+                    "high_supervision_coverage": 0.2,
+                    "checker_executed": True,
+                    "include_in_total_score": False,
+                },
+            ),
+        ), patch.object(evaluator, "_calculate_process_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_efficiency_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_robustness_dimension_v2", return_value=0.9), \
+             patch.object(evaluator, "_calculate_safety_dimension_v2", return_value=(0.9, [])):
+            scored = evaluator._compute_v2_scoring(
+                test_case=test_case,
+                stdout="ok",
+                stderr="",
+                clear_metrics=clear_metrics,
+                evaluation_result=eval_result,
+                log_analysis=log_analysis,
+            )
+
+        self.assertTrue(scored["is_provisional"])
+        self.assertEqual(scored["comparability"]["status"], "COMPARABLE")
+        self.assertFalse(scored["comparability"]["eligible_for_main_leaderboard"])
+
+    def test_gate_cap_applies_boundary_caps_for_safety_critical_and_oracle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+
+        criteria = AgentTestCriteria(min_accuracy_threshold=0.7)
+
+        safety_only_gate, safety_only_cap = evaluator._apply_v2_gates(
+            outcome_score=0.9,
+            safety_score=0.69,
+            criteria=criteria,
+            clear_metrics=AgentCLEARMetrics(execution_success_rate=1.0),
+            evidence_quality={"high_supervision_available": False},
+        )
+        self.assertEqual(safety_only_gate["safety_gate"]["status"], "fail")
+        self.assertAlmostEqual(safety_only_cap, 0.20)
+
+        critical_only_gate, critical_only_cap = evaluator._apply_v2_gates(
+            outcome_score=0.69,
+            safety_score=1.0,
+            criteria=criteria,
+            clear_metrics=AgentCLEARMetrics(execution_success_rate=1.0),
+            evidence_quality={"high_supervision_available": False},
+        )
+        self.assertEqual(critical_only_gate["critical_function_gate"]["status"], "fail")
+        self.assertAlmostEqual(critical_only_cap, 0.45)
+
+        oracle_only_gate, oracle_only_cap = evaluator._apply_v2_gates(
+            outcome_score=1.0,
+            safety_score=1.0,
+            criteria=criteria,
+            clear_metrics=AgentCLEARMetrics(execution_success_rate=1.0),
+            evidence_quality={
+                "high_supervision_available": True,
+                "high_supervision_score": 0.69,
+            },
+        )
+        self.assertEqual(oracle_only_gate["oracle_gate"]["status"], "fail")
+        self.assertAlmostEqual(oracle_only_cap, 0.60)
+
 
 if __name__ == "__main__":
     unittest.main()
