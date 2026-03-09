@@ -8,13 +8,18 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_runtime.adapters import ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from agent_runtime.adapters import (
+    ContinueCnAdapter,
+    GenericCLIAdapter,
+    MiniAgentAdapter,
+    MiniSweAgentAdapter,
+)
 from agent_runtime.factory import create_agent_adapter, supported_agent_cli_choices
 
 
 class AgentFactoryTests(unittest.TestCase):
     def test_supported_agent_cli_choices_are_stable(self):
-        self.assertEqual(supported_agent_cli_choices(), ["mini-agent", "continue"])
+        self.assertEqual(supported_agent_cli_choices(), ["mini-agent", "continue", "mini-swe-agent"])
 
     def test_create_mini_agent_adapter_with_alias(self):
         adapter = create_agent_adapter(agent="mini", auto_detect=False)
@@ -33,6 +38,17 @@ class AgentFactoryTests(unittest.TestCase):
         self.assertEqual(adapter.agent_name, "org/agent")
         self.assertEqual(adapter.config_path, "team/config")
         self.assertEqual(adapter.model_slugs, ["owner/model"])
+
+    def test_create_mini_swe_adapter_with_alias(self):
+        adapter = create_agent_adapter(
+            agent="mini-swe",
+            auto_detect=False,
+            model_name="openrouter/auto",
+            config_specs=["mini.yaml"],
+        )
+        self.assertIsInstance(adapter, MiniSweAgentAdapter)
+        self.assertEqual(adapter.model_name, "openrouter/auto")
+        self.assertEqual(adapter.config_specs, ["mini.yaml"])
 
     def test_create_continue_adapter_auto_detects_executable(self):
         with patch("agent_runtime.adapters.ContinueCnAdapter.auto_detect") as detect:

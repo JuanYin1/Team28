@@ -14,6 +14,7 @@ import argparse
 import json
 import tempfile
 import time
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -27,6 +28,15 @@ from agent_runtime.adapters import AgentAdapter, MiniAgentAdapter
 from agent_runtime.factory import create_agent_adapter
 from agent_runtime.models import AgentExecutionRequest
 from agent_runtime.script_config import resolve_script_runtime_options
+
+# Best-effort Windows console UTF-8 setup to avoid UnicodeEncodeError on emoji output.
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 @dataclass
 class EnhancedTestResult:

@@ -1028,6 +1028,88 @@ Please show me the complete process including testing.""",
             self._last_execution_metadata = {}
             return "", f"Execution error: {str(e)}", False, execution_time
 
+    def _inject_adapter_structured_timeline(self, log_analysis: Dict[str, Any]) -> None:
+        """
+        Inject timeline events provided by adapter metadata.
+
+        Adapters may return parsed trajectory events in execution.metadata["structured_timeline"]
+        when stdout/stderr do not expose step-level traces directly.
+        """
+        if log_analysis.get("detailed_timeline"):
+            return
+
+        metadata = self._last_execution_metadata or {}
+        raw_timeline = metadata.get("structured_timeline")
+        if not isinstance(raw_timeline, list):
+            return
+
+        normalized: List[Dict[str, Any]] = []
+        max_step = 0
+        tool_calls = 0
+
+        for idx, raw_event in enumerate(raw_timeline):
+            if not isinstance(raw_event, dict):
+                continue
+            event_type = str(raw_event.get("event_type") or "").strip().lower()
+            if not event_type:
+                continue
+
+            step_raw = raw_event.get("step")
+            step_val = None
+            if isinstance(step_raw, int):
+                step_val = step_raw
+            elif isinstance(step_raw, float):
+                step_val = int(step_raw)
+            if isinstance(step_val, int):
+                max_step = max(max_step, step_val)
+
+            line_raw = raw_event.get("line")
+            if isinstance(line_raw, int):
+                line_val = line_raw
+            elif isinstance(line_raw, float):
+                line_val = int(line_raw)
+            else:
+                line_val = idx
+
+            normalized_event: Dict[str, Any] = {
+                "event_type": event_type,
+                "step": step_val,
+                "line": line_val,
+            }
+
+            tool_name = raw_event.get("tool_name")
+            if isinstance(tool_name, str) and tool_name:
+                normalized_event["tool_name"] = tool_name
+
+            offset_raw = raw_event.get("time_offset_s")
+            if isinstance(offset_raw, (int, float)):
+                normalized_event["time_offset_s"] = max(0.0, float(offset_raw))
+
+            normalized.append(normalized_event)
+            if event_type == "tool_call":
+                tool_calls += 1
+                if tool_name and tool_name not in log_analysis["tools_used"]:
+                    log_analysis["tools_used"].append(tool_name)
+            elif event_type == "thinking":
+                log_analysis["thinking_blocks"] += 1
+            elif event_type == "assistant_response":
+                log_analysis["assistant_responses"] += 1
+
+        if not normalized:
+            return
+
+        log_analysis["detailed_timeline"] = normalized
+        log_analysis["tool_call_count"] = tool_calls
+        log_analysis["tool_call_count_source"] = "adapter_timeline"
+        if max_step > 0:
+            log_analysis["total_steps"] = max(log_analysis.get("total_steps", 0), max_step)
+        log_analysis["has_structured_trace"] = True
+        log_analysis["trace_signal_quality"] = max(
+            float(log_analysis.get("trace_signal_quality", 0.5)),
+            0.9,
+        )
+        log_analysis["timeline_source"] = "adapter_structured_timeline"
+
     def _inject_stream_based_timeline(
         self,
         log_analysis: Dict[str, Any],
@@ -1194,6 +1276,7 @@ Please show me the complete process including testing.""",
             # Analyze execution logs with enhanced detection
             log_analysis = self.log_analyzer.analyze_execution_log(stdout + "\n" + stderr)
             log_analysis["raw_text"] = f"{stdout}\n{stderr}"
+            self._inject_adapter_structured_timeline(log_analysis)
             self._inject_stream_based_timeline(log_analysis, execution_time)
             
             # Debug information
@@ -2044,6 +2127,54 @@ Please show me the complete process including testing.""",
                 "coordination_pct": coord_pct,
                 "method": method,
                 "is_estimated": True,
+            }
+
+        timed_events = [
+            (
+                idx,
+                event,
+                float(event["time_offset_s"]),
+            )
+            for idx, event in enumerate(timeline)
+            if isinstance(event.get("time_offset_s"), (int, float))
+        ]
+        if len(timed_events) >= 2 and execution_time > 0:
+            timed_events.sort(key=lambda item: (item[2], item[0]))
+            llm_s = 0.0
+            tool_s = 0.0
+            coord_s = 0.0
+            for position, (_, event, offset) in enumerate(timed_events):
+                next_offset = execution_time
+                if position + 1 < len(timed_events):
+                    next_offset = min(execution_time, timed_events[position + 1][2])
+                span = max(0.0, next_offset - offset)
+                event_type = event.get("event_type")
+                if event_type in LLM_TYPES:
+                    llm_s += span
+                elif event_type in TOOL_TYPES:
+                    tool_s += span
+                else:
+                    coord_s += span
+
+            consumed = llm_s + tool_s + coord_s
+            if consumed < execution_time:
+                coord_s += (execution_time - consumed)
+
+            llm_s = round(llm_s, 2)
+            tool_s = round(tool_s, 2)
+            coord_s = round(max(0.0, execution_time - llm_s - tool_s), 2)
+            return {
+                "llm_inference_s": llm_s,
+                "tool_execution_s": tool_s,
+                "coordination_s": coord_s,
+                "llm_inference_pct": round(100 * llm_s / execution_time, 1),
+                "tool_execution_pct": round(100 * tool_s / execution_time, 1),
+                "coordination_pct": round(100 * coord_s / execution_time, 1),
+                "method": "timeline_explicit_offsets",
+                "is_estimated": False,
+                "llm_events": sum(1 for e in timeline if e["event_type"] in LLM_TYPES),
+                "tool_events": sum(1 for e in timeline if e["event_type"] in TOOL_TYPES),
+                "coord_events": sum(1 for e in timeline if e["event_type"] not in LLM_TYPES | TOOL_TYPES),
             }
 
         llm_w = sum(3 for e in timeline if e["event_type"] in LLM_TYPES)

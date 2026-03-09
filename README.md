@@ -5,6 +5,7 @@ This repo runs a 3-phase evaluation pipeline for different agent runtimes.
 Supported agents (current):
 - `mini-agent`
 - `continue`
+- `mini-swe-agent` (aliases: `mini-swe`, `mswe`)
 
 Agent runtime profiles are in:
 - `agentic_sys/config/config.yaml`
@@ -26,6 +27,31 @@ That guide includes:
 - health checks
 - phase1/2/3 commands
 
+## 2a) Mini-SWE-Agent setup
+
+Install CLI (same Python env used to run this repo scripts):
+
+```bash
+pip install mini-swe-agent
+```
+
+Set Mini-SWE-Agent global config/API key:
+- Run `mini-extra config setup` (or edit `%LOCALAPPDATA%/mini-swe-agent/mini-swe-agent/.env`)
+- Configure at least model + provider key (example: `MSWEA_MODEL_NAME`, `OPENAI_API_KEY`)
+
+Quick check:
+
+```bash
+mini --help
+```
+
+If Windows terminal encoding fails on emoji output, use:
+
+```bash
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+```
+
 ## 2b) V2 evaluation workflow (config-driven)
 
 For the full end-to-end V2 scoring workflow (config fields, core suite policy,
@@ -39,6 +65,7 @@ comparability/provisional rules, multi-run aggregation, outputs):
 ```bash
 python integrated_agent_evaluation.py --agent mini-agent
 python integrated_agent_evaluation.py --agent continue
+python integrated_agent_evaluation.py --agent mini-swe-agent
 ```
 
 ### Phase 2 (enhanced monitoring + bottleneck analysis)
@@ -46,6 +73,7 @@ python integrated_agent_evaluation.py --agent continue
 ```bash
 python enhanced_comprehensive_evaluation.py --agent mini-agent
 python enhanced_comprehensive_evaluation.py --agent continue
+python enhanced_comprehensive_evaluation.py --agent mini-swe-agent
 ```
 
 ### Phase 3 (CLEAR framework evaluation)
@@ -53,6 +81,7 @@ python enhanced_comprehensive_evaluation.py --agent continue
 ```bash
 python clear_evaluation_system.py --agent mini-agent
 python clear_evaluation_system.py --agent continue
+python clear_evaluation_system.py --agent mini-swe-agent
 ```
 
 ### Single smoke test
@@ -60,6 +89,13 @@ python clear_evaluation_system.py --agent continue
 ```bash
 python run_single_test.py --agent mini-agent
 python run_single_test.py --agent continue
+python run_single_test.py --agent mini-swe-agent
+```
+
+Optional runtime override (without editing YAML):
+
+```bash
+python integrated_agent_evaluation.py --agent mini-swe-agent --adapter-option "model_name=openai/gpt-5-mini"
 ```
 
 ## 4) Results directories (default)
@@ -77,6 +113,12 @@ Continue:
 - phase2: `artifacts/continue/phase2/`
 - phase3: `artifacts/continue/phase3/`
 - single test: `artifacts/continue/phase3/single_test/`
+
+Mini-SWE-Agent:
+- phase1: `artifacts/mini-swe-agent/phase1/`
+- phase2: `artifacts/mini-swe-agent/phase2/`
+- phase3: `artifacts/mini-swe-agent/phase3/`
+- single test: `artifacts/mini-swe-agent/phase3/single_test/`
 
 ## 5) Add a new agent (YAML-only)
 

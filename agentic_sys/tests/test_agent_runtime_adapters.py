@@ -9,7 +9,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_runtime.adapters import ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from agent_runtime.adapters import (
+    ContinueCnAdapter,
+    GenericCLIAdapter,
+    MiniAgentAdapter,
+    MiniSweAgentAdapter,
+)
 from agent_runtime.models import AgentExecutionRequest
 
 
@@ -226,6 +231,91 @@ class ContinueCnAdapterTests(unittest.TestCase):
 
         self.assertFalse(result.success)
         self.assertIn("credits are exhausted", result.stderr)
+
+
+class MiniSweAgentAdapterTests(unittest.TestCase):
+    def test_build_command_with_defaults(self):
+        adapter = MiniSweAgentAdapter(executable="mini")
+        request = AgentExecutionRequest(task_prompt="do work", workspace="/tmp/ws", timeout_seconds=30)
+        self.assertEqual(
+            adapter.build_command(request),
+            [
+                "mini",
+                "-t",
+                "do work",
+                "-y",
+                "--exit-immediately",
+                "-o",
+                str(Path("/tmp/ws/mini_swe_run.traj.json")),
+            ],
+        )
+
+    def test_build_command_with_model_and_config(self):
+        adapter = MiniSweAgentAdapter(
+            executable="mini",
+            model_name="openrouter/auto",
+            config_specs=["mini.yaml", "agent.mode=yolo"],
+            extra_args=["--flag"],
+        )
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        self.assertEqual(
+            adapter.build_command(request),
+            [
+                "mini",
+                "-t",
+                "task",
+                "-m",
+                "openrouter/auto",
+                "-c",
+                "mini.yaml",
+                "-c",
+                "agent.mode=yolo",
+                "-y",
+                "--exit-immediately",
+                "-o",
+                str(Path("/tmp/ws/mini_swe_run.traj.json")),
+                "--flag",
+            ],
+        )
+
+    def test_trajectory_to_synthetic_log_extracts_steps_and_tools(self):
+        data = {
+            "messages": [
+                {"role": "system", "content": "sys"},
+                {
+                    "role": "assistant",
+                    "content": "I'll inspect files.",
+                    "extra": {"actions": [{"command": "ls -la"}]},
+                },
+                {"role": "tool", "content": "{\"returncode\": 0, \"output\": \"ok\"}"},
+                {"role": "assistant", "content": "Done"},
+            ],
+            "info": {"model_stats": {"api_calls": 2}},
+        }
+        log = MiniSweAgentAdapter._trajectory_to_synthetic_log(data)
+        self.assertIn("Step 1/3", log)
+        self.assertIn("Tool Call: bash", log)
+        self.assertIn("Session Statistics:", log)
+
+    def test_trajectory_to_structured_timeline_includes_offsets(self):
+        data = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "plan",
+                    "timestamp": "2026-03-09T10:00:00Z",
+                    "extra": {"actions": [{"command": "ls -la"}]},
+                },
+                {"role": "tool", "content": "ok", "timestamp": "2026-03-09T10:00:01Z"},
+                {"role": "assistant", "content": "done", "timestamp": "2026-03-09T10:00:03Z"},
+            ],
+        }
+        timeline = MiniSweAgentAdapter._trajectory_to_structured_timeline(data)
+        self.assertGreaterEqual(len(timeline), 4)
+        self.assertTrue(any(event["event_type"] == "tool_call" for event in timeline))
+        self.assertTrue(
+            any(isinstance(event.get("time_offset_s"), float) for event in timeline)
+        )
 
 
 class GenericCLIAdapterTests(unittest.TestCase):

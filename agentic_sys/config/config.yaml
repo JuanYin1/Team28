@@ -91,6 +91,27 @@ agents:
         - zhiruis-workspace-2
         - --auto
 
+  mini-swe-agent:
+    aliases: [mini-swe, mswe]
+    scripts:
+      phase1:
+        results_dir: artifacts/mini-swe-agent/phase1
+      phase2:
+        results_dir: artifacts/mini-swe-agent/phase2
+      phase3:
+        results_dir: artifacts/mini-swe-agent/phase3
+      run_single_test:
+        results_dir: artifacts/mini-swe-agent/phase3/single_test
+    adapter:
+      type: mini-swe-agent
+      executable: mini
+      model_name:
+      config_specs: []
+      yolo: true
+      exit_immediately: true
+      output_filename: mini_swe_run.traj.json
+      extra_args: []
+
   # Example: add a new agent with YAML only (no adapter/registry code changes).
   example-generic:
     aliases: [example]

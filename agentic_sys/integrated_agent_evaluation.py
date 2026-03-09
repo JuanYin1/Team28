@@ -17,6 +17,7 @@ import json
 import re
 import tempfile
 import time
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -36,6 +37,15 @@ TASK_HARD_CONSTRAINT_PREFIX = (
     "Return only 6-10 sentences of analysis. Do not generate deliverable documents. "
     "Do not write files."
 )
+
+# Best-effort Windows console UTF-8 setup to avoid UnicodeEncodeError on emoji output.
+try:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 @dataclass
 class TestCaseDefinition:
@@ -105,7 +115,7 @@ class IntegratedAgentEvaluator:
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=30
+            max_time_seconds=60
         ))
         
         # LOGIC PUZZLE - Hybrid evaluation
@@ -135,7 +145,7 @@ Who has which pet and likes which color?"""),
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=90
+            max_time_seconds=180
         ))
         
         # FILE OPERATIONS - Execution-based evaluation
@@ -164,7 +174,7 @@ Who has which pet and likes which color?"""),
                 reasoning_weight=0.1,
                 efficiency_weight=0.0
             ),
-            max_time_seconds=60
+            max_time_seconds=120
         ))
         
         # CODE DEBUGGING - Comprehensive evaluation
@@ -208,7 +218,7 @@ print(find_average(["1", "2", "3"]))  # This might cause issues
                 execution_weight=0.2,
                 efficiency_weight=0.0
             ),
-            max_time_seconds=120
+            max_time_seconds=240
         ))
         
         # SYSTEM ANALYSIS - Advanced reasoning
@@ -246,7 +256,7 @@ Provide reasoning for each recommendation."""),
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=180
+            max_time_seconds=360
         ))
         
         return test_cases

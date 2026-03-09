@@ -1,4 +1,10 @@
-from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from .adapters import (
+    AgentAdapter,
+    ContinueCnAdapter,
+    GenericCLIAdapter,
+    MiniAgentAdapter,
+    MiniSweAgentAdapter,
+)
 from .continue_healthcheck import (
     ContinueHealthcheckReport,
     diagnose_continue_result,
@@ -24,6 +30,7 @@ from .runner import AgentPipelineRunner
 __all__ = [
     "AgentAdapter",
     "MiniAgentAdapter",
+    "MiniSweAgentAdapter",
     "ContinueCnAdapter",
     "GenericCLIAdapter",
     "ContinueHealthcheckReport",
