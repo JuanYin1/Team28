@@ -1,9 +1,10 @@
 # Continue Setup (Headless CLI)
 
 Repository defaults:
-- workspace: `zhiruis-workspace-2`
+- org: `zhiruis-workspace-2` (passed via `--org`)
 - config: `continuedev/default-cli-config`
 - model: `anthropic/claude-haiku-4-5`
+- extra args: `--verbose --org zhiruis-workspace-2 --auto`
 
 Run the commands below from `agentic_sys/` unless noted otherwise.
 
@@ -44,17 +45,34 @@ Non-billing CLI check:
 python verify_agent_setup.py --agent continue
 ```
 
-Optional live request check:
+Optional live request checks:
 
 ```bash
 cn -p "Reply with exactly OK and nothing else." --auto
-python verify_continue_setup.py
+```
+
+Repo-aligned live check for the same defaults used by the evaluator:
+
+```bash
+python verify_continue_setup.py \
+  --config continuedev/default-cli-config \
+  --model anthropic/claude-haiku-4-5 \
+  --extra-arg=--verbose \
+  --extra-arg=--org \
+  --extra-arg=zhiruis-workspace-2 \
+  --extra-arg=--auto
 ```
 
 Expected result:
 - `verify_agent_setup.py --agent continue` should pass without sending a model request,
-- the optional live request should return `OK`,
-- `verify_continue_setup.py` should confirm the CLI can complete a real prompt.
+- the generic `cn -p ... --auto` check should return `OK`,
+- the repo-aligned `verify_continue_setup.py ...` command should confirm the
+  same Continue config/model/extra-arg path used by phase1/2/3.
+
+Note:
+- `verify_continue_setup.py` does not read `config/config.yaml` automatically.
+  Pass the repo defaults explicitly when you want to validate the exact runtime
+  path used by the evaluator.
 
 ## 4) Recommended Evaluation Run
 
@@ -91,6 +109,8 @@ Check task JSON/report field:
   - fix PATH.
 - live prompt health check hangs or fails
   - verify the CLI can access the configured workspace/model from your account.
+- generic `cn -p ... --auto` works but repo-aligned `verify_continue_setup.py ...` fails
+  - compare `--config`, `--model`, and `--extra-arg` values with `config/config.yaml`.
 - `full comparable` still low
   - rerun `--refresh-capability-profile`.
   - inspect `config/artifacts/capability_profiles/continue.json`.

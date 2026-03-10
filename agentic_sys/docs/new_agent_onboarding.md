@@ -4,7 +4,8 @@ Goal: add a new runtime without changing evaluator scoring code.
 
 ## 1) What You Change
 
-Edit only `config/config.yaml`:
+From `agentic_sys/`, edit only `config/config.yaml`
+(repo-root path: `agentic_sys/config/config.yaml`):
 - `agents.<agent>.adapter`
 - `agents.<agent>.evaluation_capabilities`
 - `agents.<agent>.evaluation_trace_parser` (required for strong trace comparability)
@@ -46,6 +47,7 @@ Notes:
 - `--probe-agent` has same behavior as `--refresh-capability-profile`.
 - `--probe-only` only refreshes profile and exits.
 - If a profile exists but all probe runs failed, evaluator ignores that profile and falls back to declared YAML capabilities.
+- Profiles are written under `config/artifacts/capability_profiles/<agent>.json`.
 
 ## 6) Comparability Checklist
 

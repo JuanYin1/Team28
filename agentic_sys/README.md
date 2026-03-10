@@ -10,6 +10,21 @@ Evaluation scripts and runtime adapters for multi-agent benchmarking.
 - Continue runtime setup: `docs/continue_setup.md`
 - Mini-SWE-Agent setup: `docs/mini_swe_setup.md`
 
+## Python Prerequisites
+
+The evaluation scripts expect these Python packages in the active environment:
+
+```bash
+pip install pyyaml
+```
+
+Optional extras by script:
+- phase2 monitoring: `pip install psutil`
+- visualization: `pip install matplotlib numpy`
+
+The repo currently uses a documented local/manual workflow. There is no
+checked-in GitHub Actions workflow under `.github/workflows/`.
+
 ## Unified Non-Billing Health Checks
 
 Run all installed agent CLI checks from one place:
@@ -45,6 +60,9 @@ Outputs are written under `artifacts/<agent>/phase3/`:
 - per-task JSON
 - markdown report
 - core/full leaderboard CSV
+
+Capability profiles are stored separately under:
+- `config/artifacts/capability_profiles/<agent>.json`
 
 ## Fair Comparison (Recommended)
 

@@ -20,6 +20,26 @@ Unless noted otherwise, shell commands below assume you are inside `agentic_sys/
 File references keep repo-root paths such as `agentic_sys/docs/...` so they stay
 unambiguous when discussed from the top-level README.
 
+## 1a) Repository Python prerequisites
+
+The repo does not currently ship a locked Python dependency file for the
+evaluation scripts themselves. In the Python environment where you run these
+commands, install:
+
+```bash
+pip install pyyaml
+```
+
+Additional script-specific extras:
+- phase2 monitoring uses `psutil`
+- `visualize_results.py` uses `matplotlib` and `numpy`
+
+Example:
+
+```bash
+pip install psutil matplotlib numpy
+```
+
 ## 2) Continue setup (team API key mode)
 
 If you use Continue with team credits, follow:
@@ -117,7 +137,9 @@ python run_single_test.py --agent mini-swe-agent
 
 ## 4) Results directories (default)
 
-All outputs are written under `agentic_sys/artifacts/`.
+Phase1/2/3 task outputs and dashboards are written under `agentic_sys/artifacts/`.
+Capability profiles are written separately under
+`agentic_sys/config/artifacts/capability_profiles/`.
 
 Mini-agent:
 - phase1: `artifacts/mini-agent/phase1/`
@@ -173,8 +195,9 @@ python run_single_test.py --agent <new-agent-name-or-alias>
 
 - Use `--agent` explicitly in all scripts.
 - Do not commit API keys/secrets.
-- Continue defaults (workspace/model) are controlled in `agentic_sys/config/config.yaml`.
+- Continue defaults (`config_path`, model, org-related extra args) are controlled in `agentic_sys/config/config.yaml`.
 - Non-billing adapter health checks are available in `agentic_sys/agent_runtime/safe_healthcheck.py`.
+- This repo currently documents a local/manual workflow; there is no checked-in GitHub Actions workflow under `.github/workflows/`.
 
 ## 8) Read Reports Carefully
 
