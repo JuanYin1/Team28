@@ -73,6 +73,8 @@ python verify_agent_setup.py --agent mini-swe-agent
 
 ### Phase 1 (basic integrated evaluation)
 
+Use this for fast end-to-end validation, not strict cross-agent comparison.
+
 ```bash
 python integrated_agent_evaluation.py --agent mini-agent
 python integrated_agent_evaluation.py --agent continue
@@ -81,6 +83,8 @@ python integrated_agent_evaluation.py --agent mini-swe-agent
 
 ### Phase 2 (enhanced monitoring + bottleneck analysis)
 
+Use this for runtime observation and bottleneck diagnosis, not leaderboard-grade scoring.
+
 ```bash
 python enhanced_comprehensive_evaluation.py --agent mini-agent
 python enhanced_comprehensive_evaluation.py --agent continue
@@ -88,6 +92,10 @@ python enhanced_comprehensive_evaluation.py --agent mini-swe-agent
 ```
 
 ### Phase 3 (CLEAR framework evaluation)
+
+Use this for capability-gated, checker-backed, repeated-run comparison across agents.
+The formal scoring/comparability contract is documented in
+`agentic_sys/docs/evaluation_workflow_v2.md`.
 
 ```bash
 python clear_evaluation_system.py --agent mini-agent --refresh-capability-profile

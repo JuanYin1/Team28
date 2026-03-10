@@ -2,6 +2,21 @@
 
 This is the scoring/comparability contract for `clear_evaluation_system.py`.
 
+## Scope
+
+This document applies to phase3 only.
+
+Phase1 and phase2 are intentionally not forced into the same V2/CLEAR contract:
+- Phase1 is a basic integration check. Its job is to answer "can this agent run the task flow end-to-end" rather than "is this result strictly comparable across agents".
+- Phase2 is for richer runtime observation and bottleneck inspection. It is useful for debugging, profiling, and qualitative diagnosis, but it does not enforce the capability-gated comparability rules used for leaderboards.
+- Phase3 is the first stage that requires repeated runs, checker-backed outcomes, explicit comparability fields, capability resolution, and report semantics stable enough for cross-agent comparison.
+
+Why not adapt the same system to phase1/2:
+- It would raise the cost and setup burden of early-stage validation. Phase1/2 need to stay cheap and fast enough for iteration.
+- It would blur the purpose of the pipeline. A quick smoke/instrumentation phase should not look like a leaderboard-grade benchmark.
+- Many V2 dimensions depend on signals that are optional, incomplete, or intentionally noisy in earlier phases.
+- Forcing phase1/2 into strict comparability would create false precision: the numbers would look comparable before the evidence quality actually supports that claim.
+
 ## 1) Core Principles
 
 - No agent-ID scoring branches. Runtime differences must come from:
