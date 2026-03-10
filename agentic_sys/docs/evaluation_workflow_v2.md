@@ -2,9 +2,31 @@
 
 This is the scoring/comparability contract for `clear_evaluation_system.py`.
 
-## Scope
+## Part A: Beginner Overview
 
-This document applies to phase3 only.
+This section is for teammates who want to understand the evaluation workflow
+without reading the implementation details first.
+
+### What We Are Trying To Measure
+
+We are not only asking whether an agent can produce a plausible answer.
+We want to know:
+- did it finish the task,
+- did an external checker confirm the result,
+- does it succeed repeatedly,
+- do we have enough trace/runtime evidence to compare it fairly with other agents.
+
+That is why the pipeline has three phases instead of one.
+
+### The Three Phases In Plain Language
+
+| Phase | Main question | Typical use | Not for |
+|---|---|---|---|
+| Phase1 | "Can this agent run the task flow at all?" | smoke test, integration check | strict leaderboard comparison |
+| Phase2 | "What happened while it was running?" | profiling, debugging, bottleneck analysis | final benchmark claims |
+| Phase3 | "Can we compare this agent fairly with others?" | checker-backed scoring, repeated runs, reports | quick iteration |
+
+### Why CLEAR/V2 Starts At Phase3
 
 Phase1 and phase2 are intentionally not forced into the same V2/CLEAR contract:
 - Phase1 is a basic integration check. Its job is to answer "can this agent run the task flow end-to-end" rather than "is this result strictly comparable across agents".
@@ -16,6 +38,49 @@ Why not adapt the same system to phase1/2:
 - It would blur the purpose of the pipeline. A quick smoke/instrumentation phase should not look like a leaderboard-grade benchmark.
 - Many V2 dimensions depend on signals that are optional, incomplete, or intentionally noisy in earlier phases.
 - Forcing phase1/2 into strict comparability would create false precision: the numbers would look comparable before the evidence quality actually supports that claim.
+
+### What Happens In A Phase3 Run
+
+For each agent and each task, phase3 does the following:
+1. Run the task and collect outputs, traces, and runtime metadata.
+2. Use a checker when available to verify that the task result is actually correct.
+3. Repeat the task multiple times so the score is not based on a lucky single run.
+4. Score the task on the supported V2 dimensions.
+5. Mark each dimension and each task as comparable, provisional, unsupported, or unknown based on the evidence actually observed.
+6. Write task JSON, a markdown report, and leaderboard CSVs.
+
+### What "Comparable" Means
+
+Comparable does not mean "the run looked good".
+It means the system has enough evidence to compare that result fairly with other agents under the same rules.
+
+In practice, phase3 checks things like:
+- did the checker run,
+- do we have repeated runs,
+- do we have wall-clock timing,
+- did the runtime actually expose the trace/process signals that this dimension needs.
+
+If the evidence is missing, the system should say so instead of pretending the
+numbers are equally valid.
+
+### What The Final Outputs Mean
+
+Phase3 produces:
+- per-task JSON: the ground-truth machine-readable result,
+- markdown report: human-readable summary and caveats,
+- leaderboard CSVs: comparison-friendly aggregates,
+- capability profile: what this runtime actually proved it can expose locally.
+
+When report text and raw data seem to disagree, the task JSON is the source of truth.
+
+## Part B: Protocol And Implementation Constraints
+
+This section is the developer-facing contract. Use it when validating schema,
+scoring, comparability, or report behavior.
+
+## Scope
+
+This document applies to phase3 only.
 
 ## 1) Core Principles
 
