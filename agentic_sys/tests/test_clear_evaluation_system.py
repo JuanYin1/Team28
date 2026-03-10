@@ -272,6 +272,88 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("[TRACE_LOG:/tmp/agent.log]", stdout)
         self.assertIn("toolName", stdout)
 
+    async def test_execute_task_retains_structured_timeline_metadata_for_clear_analysis(self):
+        class DummyAdapter:
+            conda_env = None
+
+            def run(self, request, on_process_start=None):
+                if on_process_start:
+                    on_process_start(5555)
+                return AgentExecutionResult(
+                    command=["mini", "-t", request.task_prompt],
+                    stdout="raw stdout",
+                    stderr="",
+                    success=True,
+                    execution_time_seconds=1.0,
+                    return_code=0,
+                    pid=5555,
+                    metadata={
+                        "structured_timeline": [
+                            {"event_type": "assistant_response", "content": "planning"},
+                            {"event_type": "tool_call", "tool_name": "bash"},
+                        ]
+                    },
+                )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, agent_adapter=DummyAdapter())
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                expected_file_changes=[],
+                evaluation_criteria=AgentTestCriteria(),
+            )
+            stdout, _, success, _ = await evaluator.execute_agent_task(test_case)
+
+        self.assertTrue(success)
+        self.assertEqual(stdout, "raw stdout")
+        self.assertEqual(
+            evaluator._last_execution_metadata["structured_timeline"][1]["tool_name"],
+            "bash",
+        )
+
+    async def test_structured_timeline_metadata_backfills_clear_log_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+            evaluator._last_execution_metadata = {
+                "structured_timeline": [
+                    {"event_type": "assistant_response", "content": "planning"},
+                    {"event_type": "tool_call", "tool_name": "bash"},
+                ]
+            }
+            log_analysis = {
+                "total_steps": 0,
+                "tools_used": [],
+                "tool_call_count": 0,
+                "tool_call_count_source": "none",
+                "thinking_blocks": 0,
+                "assistant_responses": 0,
+                "errors_encountered": 0,
+                "successful_operations": 0,
+                "step_breakdown": [],
+                "execution_timeline": [],
+                "session_stats": {},
+                "log_sources": ["stdout"],
+                "session_duration": {},
+                "tool_timings": [],
+                "detailed_timeline": [],
+                "has_structured_trace": False,
+                "trace_signal_quality": 0.5,
+            }
+
+            augmented = evaluator._augment_log_analysis_with_execution_metadata(log_analysis)
+
+        self.assertIn("adapter_structured_timeline", augmented["log_sources"])
+        self.assertEqual(augmented["tools_used"], ["bash"])
+        self.assertEqual(augmented["tool_call_count"], 1)
+        self.assertEqual(augmented["tool_call_count_source"], "adapter_structured_timeline")
+        self.assertEqual(len(augmented["detailed_timeline"]), 2)
+        self.assertEqual(augmented["total_steps"], 1)
+        self.assertTrue(augmented["has_structured_trace"])
+        self.assertEqual(augmented["trace_signal_quality"], 1.0)
+
     async def test_non_mini_agent_missing_trace_is_unknown_not_rewarded(self):
         class ContinueLikeAdapter:
             agent_id = "continue-cn"

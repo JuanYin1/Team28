@@ -870,6 +870,7 @@ class AgentCLEAREvaluator:
         )
         self._current_run_id: Optional[str] = None
         self._current_run_artifacts: List[Path] = []
+        self._last_execution_metadata: Dict[str, Any] = {}
         
         # Logging setup
         logging.basicConfig(level=logging.INFO)
@@ -1255,6 +1256,7 @@ Please show me the complete process including testing.""",
         """
         
         start_time = time.time()
+        self._last_execution_metadata = {}
         
         try:
             with tempfile.TemporaryDirectory() as temp_workspace:
@@ -1270,6 +1272,8 @@ Please show me the complete process including testing.""",
                 stderr = execution.stderr or ""
                 success = execution.success
                 execution_time = execution.execution_time_seconds
+                if isinstance(getattr(execution, "metadata", None), dict):
+                    self._last_execution_metadata = dict(execution.metadata)
 
                 # Append adapter-captured trace logs (agent-agnostic) for parser visibility.
                 trace_chunks = []
@@ -1306,6 +1310,108 @@ Please show me the complete process including testing.""",
         except Exception as e:
             execution_time = time.time() - start_time
             return "", f"Execution error: {str(e)}", False, execution_time
+
+    def _augment_log_analysis_with_execution_metadata(
+        self,
+        log_analysis: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        metadata = self._last_execution_metadata if isinstance(self._last_execution_metadata, dict) else {}
+        raw_timeline = metadata.get("structured_timeline")
+        if not isinstance(raw_timeline, list):
+            return log_analysis
+
+        normalized_timeline: List[Dict[str, Any]] = []
+        for index, item in enumerate(raw_timeline):
+            if not isinstance(item, dict):
+                continue
+            event_type = str(item.get("event_type") or "").strip()
+            if not event_type:
+                continue
+            normalized_event = dict(item)
+            normalized_event.setdefault("line", index)
+            normalized_timeline.append(normalized_event)
+
+        if not normalized_timeline:
+            return log_analysis
+
+        log_sources = log_analysis.setdefault("log_sources", [])
+        if "adapter_structured_timeline" not in log_sources:
+            log_sources.append("adapter_structured_timeline")
+        log_analysis["metadata_structured_timeline"] = normalized_timeline
+
+        if not log_analysis.get("detailed_timeline"):
+            log_analysis["detailed_timeline"] = list(normalized_timeline)
+
+        if not log_analysis.get("tools_used"):
+            tools_seen: List[str] = []
+            for event in normalized_timeline:
+                if event.get("event_type") != "tool_call":
+                    continue
+                tool_name = str(event.get("tool_name") or "").strip()
+                if tool_name and tool_name not in tools_seen:
+                    tools_seen.append(tool_name)
+            log_analysis["tools_used"] = tools_seen
+
+        if int(log_analysis.get("tool_call_count") or 0) <= 0:
+            metadata_tool_calls = sum(
+                1 for event in normalized_timeline
+                if event.get("event_type") == "tool_call"
+            )
+            if metadata_tool_calls > 0:
+                log_analysis["tool_call_count"] = metadata_tool_calls
+                log_analysis["tool_call_count_source"] = "adapter_structured_timeline"
+
+        if int(log_analysis.get("assistant_responses") or 0) <= 0:
+            log_analysis["assistant_responses"] = sum(
+                1 for event in normalized_timeline
+                if event.get("event_type") == "assistant_response"
+            )
+
+        if int(log_analysis.get("successful_operations") or 0) <= 0:
+            log_analysis["successful_operations"] = sum(
+                1 for event in normalized_timeline
+                if event.get("event_type") == "tool_result"
+            )
+
+        if int(log_analysis.get("errors_encountered") or 0) <= 0:
+            log_analysis["errors_encountered"] = sum(
+                1 for event in normalized_timeline
+                if event.get("event_type") == "error"
+            )
+
+        if int(log_analysis.get("total_steps") or 0) <= 0:
+            step_values = [
+                int(event.get("step"))
+                for event in normalized_timeline
+                if isinstance(event.get("step"), int)
+            ]
+            if step_values:
+                log_analysis["total_steps"] = max(step_values)
+            elif int(log_analysis.get("tool_call_count") or 0) > 0:
+                log_analysis["total_steps"] = int(log_analysis["tool_call_count"])
+
+        has_step_signal = int(log_analysis.get("total_steps") or 0) > 0
+        has_tool_signal = int(log_analysis.get("tool_call_count") or 0) > 0
+        has_timeline_signal = bool(log_analysis.get("detailed_timeline"))
+        log_analysis["has_structured_trace"] = bool(
+            log_analysis.get("has_structured_trace")
+            or has_step_signal
+            or has_tool_signal
+            or has_timeline_signal
+        )
+
+        if has_step_signal and has_tool_signal:
+            log_analysis["trace_signal_quality"] = max(
+                float(log_analysis.get("trace_signal_quality", 0.0)),
+                1.0,
+            )
+        elif log_analysis["has_structured_trace"]:
+            log_analysis["trace_signal_quality"] = max(
+                float(log_analysis.get("trace_signal_quality", 0.0)),
+                0.8,
+            )
+
+        return log_analysis
 
     def _bind_monitor_target_pid(self, launcher_pid: int, conda_mode: bool) -> None:
         """
@@ -1393,6 +1499,7 @@ Please show me the complete process including testing.""",
 
             # Analyze execution logs with enhanced detection
             log_analysis = self.log_analyzer.analyze_execution_log(stdout + "\n" + stderr)
+            log_analysis = self._augment_log_analysis_with_execution_metadata(log_analysis)
             log_analysis["raw_text"] = f"{stdout}\n{stderr}"
             
             # Debug information
