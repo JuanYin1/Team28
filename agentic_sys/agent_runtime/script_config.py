@@ -393,14 +393,23 @@ def resolve_evaluation_settings(
 
         probed_caps = {}
         resolved_caps = declared_caps
+        profile_usable = isinstance(profile_payload, dict)
         if isinstance(profile_payload, dict):
+            probe_results = profile_payload.get("probe_results")
+            if isinstance(probe_results, list) and probe_results:
+                has_successful_probe = any(
+                    bool(item.get("success"))
+                    for item in probe_results
+                    if isinstance(item, dict)
+                )
+                if not has_successful_probe:
+                    profile_usable = False
+
             maybe_probed = profile_payload.get("probed_capabilities")
-            if isinstance(maybe_probed, dict):
+            if profile_usable and isinstance(maybe_probed, dict):
                 probed_caps = _normalize_evaluation_capabilities(maybe_probed)
             maybe_resolved = profile_payload.get("resolved_capabilities")
-            if isinstance(maybe_resolved, dict):
-                resolved_caps = _normalize_evaluation_capabilities(maybe_resolved)
-            elif probed_caps:
+            if profile_usable and probed_caps:
                 # Conservative merge: a capability is considered resolved only if declared and probed.
                 merged = _normalize_evaluation_capabilities({})
                 for key, value in declared_caps.items():
@@ -412,13 +421,17 @@ def resolve_evaluation_settings(
                     else:
                         merged[key] = bool(value) and bool(probed_caps.get(key, False))
                 resolved_caps = merged
+            elif profile_usable and isinstance(maybe_resolved, dict):
+                # Backward compatibility for legacy profiles that only persisted resolved_capabilities.
+                resolved_caps = _normalize_evaluation_capabilities(maybe_resolved)
 
         resolved["evaluation_agent_id"] = normalized_agent
         resolved["declared_capabilities"] = declared_caps
         resolved["probed_capabilities"] = probed_caps
         resolved["resolved_capabilities"] = resolved_caps
         resolved["trace_parser_profile"] = trace_parser_profile
-        resolved["capability_profile_applied"] = bool(use_capability_profile and isinstance(profile_payload, dict))
+        resolved["capability_profile_applied"] = bool(use_capability_profile and profile_usable)
+        resolved["capability_profile_usable"] = bool(profile_usable)
         resolved["capability_profile_path"] = str(profile_path)
 
     return resolved, source_path

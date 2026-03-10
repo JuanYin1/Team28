@@ -131,6 +131,55 @@ agents:
         self.assertEqual(Path(settings["capability_profile_path"]).name, "demo-agent.json")
         self.assertTrue(settings["capability_profile_applied"])
 
+    def test_probe_profile_prefers_declared_and_probed_over_stale_resolved_payload(self):
+        config_yaml = """
+evaluation:
+  v2:
+    capability_probe:
+      profile_dir: artifacts/capability_profiles
+agents:
+  demo-agent:
+    aliases: [demo]
+    evaluation_capabilities:
+      structured_trace: true
+      tool_trace: true
+      step_trace: true
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "agent_profiles.yaml"
+            cfg.write_text(config_yaml, encoding="utf-8")
+            profile_dir = Path(tmp) / "artifacts" / "capability_profiles"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            profile_path = profile_dir / "demo-agent.json"
+            profile_path.write_text(
+                """{
+  "agent_id": "demo-agent",
+  "probed_capabilities": {
+    "structured_trace": true,
+    "tool_trace": false,
+    "step_trace": true
+  },
+  "resolved_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": true
+  }
+}""",
+                encoding="utf-8",
+            )
+
+            settings, _ = resolve_evaluation_settings(
+                config_path=str(cfg),
+                script_name="phase3",
+                agent="demo",
+                use_capability_profile=True,
+            )
+
+        self.assertFalse(
+            settings["resolved_capabilities"]["tool_trace"],
+            "Resolved capabilities should be recomputed from declared/probed and ignore stale profile-resolved flags.",
+        )
+
     def test_probe_profile_is_not_applied_unless_enabled(self):
         config_yaml = """
 evaluation:
@@ -172,6 +221,59 @@ agents:
         self.assertTrue(settings["resolved_capabilities"]["tool_trace"])
         self.assertTrue(settings["resolved_capabilities"]["step_trace"])
         self.assertFalse(settings["capability_profile_applied"])
+
+    def test_failed_probe_profile_is_ignored_and_declared_capabilities_are_used(self):
+        config_yaml = """
+evaluation:
+  v2:
+    capability_probe:
+      profile_dir: artifacts/capability_profiles
+agents:
+  demo-agent:
+    aliases: [demo]
+    evaluation_capabilities:
+      structured_trace: true
+      tool_trace: true
+      step_trace: true
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "agent_profiles.yaml"
+            cfg.write_text(config_yaml, encoding="utf-8")
+            profile_dir = Path(tmp) / "artifacts" / "capability_profiles"
+            profile_dir.mkdir(parents=True, exist_ok=True)
+            profile_path = profile_dir / "demo-agent.json"
+            profile_path.write_text(
+                """{
+  "agent_id": "demo-agent",
+  "probed_capabilities": {
+    "structured_trace": false,
+    "tool_trace": false,
+    "step_trace": false
+  },
+  "resolved_capabilities": {
+    "structured_trace": false,
+    "tool_trace": false,
+    "step_trace": false
+  },
+  "probe_results": [
+    {"success": false, "return_code": 1},
+    {"success": false, "return_code": 1}
+  ]
+}""",
+                encoding="utf-8",
+            )
+
+            settings, _ = resolve_evaluation_settings(
+                config_path=str(cfg),
+                script_name="phase3",
+                agent="demo",
+                use_capability_profile=True,
+            )
+
+        self.assertFalse(settings["capability_profile_applied"])
+        self.assertFalse(settings["capability_profile_usable"])
+        self.assertTrue(settings["resolved_capabilities"]["tool_trace"])
+        self.assertTrue(settings["resolved_capabilities"]["step_trace"])
 
     def test_trace_parser_profile_is_loaded_from_agent_config(self):
         config_yaml = """

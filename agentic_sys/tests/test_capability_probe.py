@@ -58,6 +58,34 @@ class _ProbeAdapter:
         )
 
 
+class _TraceOnlyProbeAdapter:
+    agent_id = "probe-agent"
+    process_name_hint = "probe-agent"
+
+    def run(self, request, on_process_start=None):
+        if on_process_start:
+            on_process_start(9999)
+        trace_text = (
+            '{"toolName":"Write"}\n'
+            '{"step":1}\n'
+            'assistant: completed\n'
+        )
+        return AgentExecutionResult(
+            command=["fake-agent"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.01,
+            return_code=0,
+            pid=9999,
+            metadata={
+                "trace_log_chunks": [
+                    {"path": "/tmp/fake.log", "text": trace_text},
+                ]
+            },
+        )
+
+
 class CapabilityProbeTests(unittest.TestCase):
     def test_probe_generates_profile_and_resolved_capabilities(self):
         declared = {
@@ -86,6 +114,10 @@ class CapabilityProbeTests(unittest.TestCase):
 
         self.assertIsNotNone(saved)
         self.assertEqual(saved["agent_id"], "probe-agent")
+        self.assertTrue(saved["profile_metadata"]["auto_generated"])
+        self.assertTrue(saved["profile_metadata"]["do_not_edit_manually"])
+        self.assertIn("DO NOT EDIT MANUALLY", saved["profile_metadata"]["notice"])
+        self.assertTrue(str(saved["generated_at_utc"]).endswith("Z"))
         self.assertTrue(profile["probed_capabilities"]["step_trace"])
         self.assertTrue(profile["resolved_capabilities"]["tool_trace"])
         self.assertTrue(profile["resolved_capabilities"]["token_usage"])
@@ -114,6 +146,27 @@ class CapabilityProbeTests(unittest.TestCase):
         self.assertFalse(profile["resolved_capabilities"]["tool_trace"])
         self.assertFalse(profile["resolved_capabilities"]["step_trace"])
         self.assertEqual(payload["agent_id"], "probe-agent-low")
+
+    def test_probe_reads_trace_log_chunks_from_adapter_metadata(self):
+        declared = {
+            "structured_trace": True,
+            "tool_trace": True,
+            "step_trace": True,
+            "timeline_events": True,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = run_capability_probe(
+                adapter=_TraceOnlyProbeAdapter(),
+                agent_id="probe-agent-trace",
+                declared_capabilities=declared,
+                profile_dir=str(Path(tmp) / "profiles"),
+                timeout_seconds=5.0,
+            )
+
+        self.assertTrue(profile["probed_capabilities"]["tool_trace"])
+        self.assertTrue(profile["probed_capabilities"]["step_trace"])
+        self.assertTrue(profile["probed_capabilities"]["structured_trace"])
+        self.assertTrue(profile["resolved_capabilities"]["timeline_events"])
 
 
 if __name__ == "__main__":

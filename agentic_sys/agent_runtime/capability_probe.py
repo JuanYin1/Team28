@@ -4,8 +4,9 @@ import json
 import re
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from .adapters import AgentAdapter
 from .models import AgentExecutionRequest
@@ -89,6 +90,7 @@ def run_capability_probe(
     declared_capabilities: Dict[str, Any],
     profile_dir: str = "artifacts/capability_profiles",
     timeout_seconds: float = 30.0,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
 ) -> Dict[str, Any]:
     """
     Run lightweight runtime probes and persist a capability profile.
@@ -119,7 +121,11 @@ def run_capability_probe(
     )
 
     probe_results = []
-    for prompt in (artifact_prompt, trace_prompt, error_prompt, stats_prompt):
+    prompts = [artifact_prompt, trace_prompt, error_prompt, stats_prompt]
+    total_prompts = len(prompts)
+    for idx, prompt in enumerate(prompts, 1):
+        if progress_callback:
+            progress_callback(idx, total_prompts, "start")
         with tempfile.TemporaryDirectory() as workspace:
             request = AgentExecutionRequest(
                 task_prompt=prompt,
@@ -129,12 +135,23 @@ def run_capability_probe(
             started = time.time()
             execution = adapter.run(request)
             elapsed = max(0.0, time.time() - started)
+            metadata = execution.metadata if isinstance(execution.metadata, dict) else {}
+            trace_chunks = metadata.get("trace_log_chunks", [])
+            trace_text_parts = []
+            if isinstance(trace_chunks, list):
+                for chunk in trace_chunks:
+                    if not isinstance(chunk, dict):
+                        continue
+                    text = str(chunk.get("text", "")).strip()
+                    if text:
+                        trace_text_parts.append(text)
             probe_results.append(
                 {
                     "prompt": prompt,
                     "workspace": workspace,
                     "stdout": execution.stdout or "",
                     "stderr": execution.stderr or "",
+                    "trace_text": "\n".join(trace_text_parts),
                     "success": bool(execution.success),
                     "return_code": execution.return_code,
                     "reported_duration_s": float(execution.execution_time_seconds or 0.0),
@@ -142,8 +159,15 @@ def run_capability_probe(
                     "artifact_exists": (Path(workspace) / "probe_artifact.txt").exists(),
                 }
             )
+        if progress_callback:
+            progress_callback(idx, total_prompts, "done")
 
-    all_text = "\n".join((f"{item['stdout']}\n{item['stderr']}" for item in probe_results)).lower()
+    all_text = "\n".join(
+        (
+            f"{item['stdout']}\n{item['stderr']}\n{item.get('trace_text', '')}"
+            for item in probe_results
+        )
+    ).lower()
     artifact_probe = probe_results[0]
 
     probed_caps["checker_support"]["file_artifacts"] = bool(artifact_probe.get("artifact_exists"))
@@ -153,14 +177,36 @@ def run_capability_probe(
         re.search(r"(error|failed|exception).*(fix|correct|retry|success)", all_text, re.DOTALL)
     )
 
-    probed_caps["step_trace"] = bool(re.search(r"\bstep\b", all_text))
-    probed_caps["tool_trace"] = bool(
-        re.search(r"(tool|write_file|read_file|bash|command|shell)", all_text)
+    step_signal = re.search(
+        r"(?im)(?:\bstep\s+\d+\b|\"step\"\s*:\s*\d+|^\s*\d+\.)",
+        all_text,
     )
+    tool_signal = re.search(
+        r"(?im)(?:\"toolname\"\s*:\s*\"[a-zA-Z_][a-zA-Z0-9_\-]*\"|"
+        r"\"function\"\s*:\s*\{\s*\"name\"\s*:\s*\"[a-zA-Z_][a-zA-Z0-9_\-]*\"|"
+        r"\b(write_file|read_file|bash|edit|multiedit|tool call|tool)\b)",
+        all_text,
+    )
+    llm_signal = re.search(r"(?im)\b(thinking|reasoning|assistant|final)\b", all_text)
+    error_signal = re.search(r"(?im)\b(error|traceback|exception|failed)\b", all_text)
+
+    probed_caps["step_trace"] = bool(step_signal)
+    probed_caps["tool_trace"] = bool(tool_signal)
     probed_caps["structured_trace"] = bool(
-        probed_caps["step_trace"] or probed_caps["tool_trace"] or re.search(r"(thinking|assistant)", all_text)
+        probed_caps["step_trace"] or probed_caps["tool_trace"] or llm_signal
     )
-    probed_caps["timeline_events"] = bool(probed_caps["structured_trace"] and (probed_caps["step_trace"] or probed_caps["tool_trace"]))
+    event_types_seen = 0
+    if probed_caps["step_trace"]:
+        event_types_seen += 1
+    if probed_caps["tool_trace"]:
+        event_types_seen += 1
+    if llm_signal:
+        event_types_seen += 1
+    if error_signal:
+        event_types_seen += 1
+    probed_caps["timeline_events"] = bool(
+        probed_caps["structured_trace"] and event_types_seen >= 2
+    )
     probed_caps["session_stats"] = bool(
         re.search(r"(total messages|tool calls|tokens used|session duration)", all_text)
     )
@@ -172,7 +218,16 @@ def run_capability_probe(
 
     resolved_caps = _and_capabilities(normalized_declared, probed_caps)
 
+    generated_at_unix = int(time.time())
+    generated_at_utc = datetime.fromtimestamp(generated_at_unix, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
     profile = {
+        "profile_metadata": {
+            "auto_generated": True,
+            "do_not_edit_manually": True,
+            "notice": "AUTO-GENERATED FILE. DO NOT EDIT MANUALLY. Regenerate with --refresh-capability-profile or --probe-agent.",
+            "generated_at_utc": generated_at_utc,
+        },
         "agent_id": agent_id,
         "declared_capabilities": normalized_declared,
         "probed_capabilities": probed_caps,
@@ -187,11 +242,11 @@ def run_capability_probe(
             }
             for item in probe_results
         ],
-        "generated_at_unix": int(time.time()),
+        "generated_at_unix": generated_at_unix,
+        "generated_at_utc": generated_at_utc,
     }
 
     path = capability_profile_path(agent_id=agent_id, profile_dir=profile_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
     return profile
-
