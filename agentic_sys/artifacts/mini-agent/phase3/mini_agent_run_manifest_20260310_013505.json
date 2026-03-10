@@ -1,0 +1,16 @@
+{
+  "schema_version": "phase3.run_manifest.v1",
+  "run_id": "20260310_013505",
+  "agent_id": "mini-agent",
+  "results_dir": "artifacts/mini-agent/phase3",
+  "generated_at": "2026-03-10T01:42:14.305612",
+  "artifacts": [
+    "mini_agent_simple_file_operations_1773131802.json",
+    "mini_agent_python_coding_task_1773131915.json",
+    "mini_agent_data_analysis_task_1773132013.json",
+    "mini_agent_error_handling_test_1773132134.json",
+    "mini_agent_clear_report_20260310_013505.md",
+    "mini_agent_leaderboard_core_20260310_013505.csv",
+    "mini_agent_leaderboard_full_20260310_013505.csv"
+  ]
+}

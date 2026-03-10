@@ -3,7 +3,7 @@
     "auto_generated": true,
     "do_not_edit_manually": true,
     "notice": "AUTO-GENERATED FILE. DO NOT EDIT MANUALLY. Regenerate with --refresh-capability-profile or --probe-agent.",
-    "generated_at_utc": "2026-03-10T00:25:39Z"
+    "generated_at_utc": "2026-03-10T08:35:05Z"
   },
   "agent_id": "mini-agent",
   "declared_capabilities": {
@@ -58,32 +58,32 @@
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 7.398015975952148,
-      "wall_clock_duration_s": 7.398152112960815,
+      "reported_duration_s": 10.022480010986328,
+      "wall_clock_duration_s": 10.022708177566528,
       "artifact_exists": true
     },
     {
-      "success": true,
-      "return_code": 0,
-      "reported_duration_s": 12.182682037353516,
-      "wall_clock_duration_s": 12.182788133621216,
+      "success": false,
+      "return_code": -9,
+      "reported_duration_s": 30.023624897003174,
+      "wall_clock_duration_s": 30.023865222930908,
       "artifact_exists": false
     },
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 11.340620994567871,
-      "wall_clock_duration_s": 11.340725660324097,
+      "reported_duration_s": 16.445213079452515,
+      "wall_clock_duration_s": 16.44534707069397,
       "artifact_exists": false
     },
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 6.1335039138793945,
-      "wall_clock_duration_s": 6.133598804473877,
+      "reported_duration_s": 10.370540618896484,
+      "wall_clock_duration_s": 10.370764970779419,
       "artifact_exists": false
     }
   ],
-  "generated_at_unix": 1773102339,
-  "generated_at_utc": "2026-03-10T00:25:39Z"
+  "generated_at_unix": 1773131705,
+  "generated_at_utc": "2026-03-10T08:35:05Z"
 }

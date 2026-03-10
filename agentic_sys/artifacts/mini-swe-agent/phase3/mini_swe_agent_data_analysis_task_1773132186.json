@@ -1,0 +1,477 @@
+{
+  "schema_version": "phase3.v3",
+  "test_case": {
+    "name": "data_analysis_task",
+    "category": "analysis",
+    "description": "Analyze data and generate insights with multiple steps",
+    "task_prompt": "Please help me analyze some sample data:\n\n1. Create a CSV file called 'sales_data.csv' with this data:\n   - Headers: Month, Sales, Profit\n   - Data rows:\n     January,10000,2000\n     February,12000,2400\n     March,9000,1800\n     April,15000,3000\n     May,11000,2200\n\n2. Write a Python script that:\n   - Reads the CSV file\n   - Calculates total sales and profit\n   - Finds the month with highest sales\n   - Calculates average monthly profit\n   - Saves results to 'analysis_results.txt'\n\n3. Run the script and show me the analysis results\n\n4. End your final response with this exact summary format:\n   TOTAL_SALES=57000\n   TOTAL_PROFIT=11400\n   TOP_MONTH=April\n   AVG_MONTHLY_PROFIT=2280",
+    "core_comparable": true
+  },
+  "clear_metrics": {
+    "llm_api_calls": 4,
+    "total_tokens_used": 1376,
+    "tool_executions": 2,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.007300666666666667,
+    "cost_is_estimated": true,
+    "context_window_usage": 0.0,
+    "total_task_time": 35.96524731318156,
+    "agent_thinking_time": 22.21,
+    "tool_execution_time": 7.4,
+    "llm_response_time": 22.21,
+    "steps_to_completion": 3,
+    "supports_structured_trace": true,
+    "trace_signal_quality": 1.0,
+    "time_breakdown_is_estimated": true,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 0.6666666666666666,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 167.80598958333334,
+    "cpu_usage_percent": 0.1956431787757089,
+    "steps_per_second": 0.08443309273139316,
+    "task_completion_accuracy": 1.0,
+    "output_quality_score": 0.9083333333333332,
+    "reasoning_coherence": 0.8000000000000002,
+    "tool_usage_correctness": 0.8666666666666667,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 1.0,
+    "error_recovery_effectiveness": 1.0,
+    "response_consistency": 0.0,
+    "response_consistency_measured": false,
+    "system_stability": 1.0
+  },
+  "execution": {
+    "tools_used": [
+      "read_file",
+      "write_file"
+    ],
+    "steps_taken": 3,
+    "success": 1.0,
+    "output_length": 7732,
+    "stdout_excerpt": "Step 1/3\nStep 2/3\nthinking: planning next action\nassistant: I'll create the CSV file, write a Python script to analyze it, run the script, and show the resulting analysis file. Then I'll submit the final completion command.\n\nI'll run a bash sequence to:\n- create sales_data.csv\n- create analyze.py\n- run the script\n- display analysis_results.txt\n\nThen I'll finish by issuing the required completion command.\nTool Call: read_file\n{\n  \"returncode\": 0,\n  \"output\": \"Total Sales: 57000\\nTotal Profit: 11400\\nTop Month: April\\nAverage Monthly Profit: 2280\\n---- analysis_results.txt content ----\\nTotal Sales: 57000\\nTotal Profit: 11400\\nTop Month: April\\nAverage Monthly Profit: 2280\"\n}\nStep 3/3\nTool Call: write_file\n{\n  \"returncode\": -1,\n  \"output\": \"\", \"exception_info\": \"action was not executed\"\n}\n\ud83d\udc4b This is mini-swe-agent version 2.2.6.\nCheck the v2 migration guide at https://klieret.short.gy/mini-v2-migration\nLoading global config from '/Users/Raymond/Library/Application Support/mini-swe-agent/.env'\nBuilding agent config from specs: ['/Users/Raymond/anaconda3/lib/python3.10/site-packages/minisweagent/config/mini.yaml']\n\nSystem:\nYou are a helpful assistant that can interact with a computer.\n\nUser:\nPlease solve this issue: Please help me analyze some sample data:\n\n1. Create a CSV file called 'sales_data.csv' with this data:\n   - Headers: Month, Sales, Profit\n   - Data rows:\n     January,10000,2000\n     February,12000,2400\n     March,9000,1800\n     April,15000,3000\n     May,11000,2200\n\n2. Write a Python script that:\n   - Reads the CSV file\n   - Calculates total sales and profit\n   - Finds the month with highest sales\n   - Calculates average monthly profit\n   - Saves results to 'analysis_results.txt'\n\n3. Run the script and show me the analysis results\n\n4. End your final response with this exact summary format:\n   TOTAL_SALES=57000\n   TOTAL_PROFIT=11400\n   TOP_MONTH=April\n   AVG_MONTHLY_PROFIT=2280\n\nYou can execute bash commands and edit files to implement the necessary changes.\n\n## Recommended Workflow\n\nThis workflows should be done step-by-step so that you can iterate on your changes and any possible problems.\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n6. Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n   Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n- Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n  Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n[Makes bash tool call with {\"command\": \"ls -la\"} as arguments]\n</example_response>\n\n<system_information>\nDarwin 25.3.0 Darwin Kernel Version 25.3.0: Wed Jan 28 20:53:01 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T8103 x86_64\n</system_information>\n\n## Useful command examples\n\n### Create a new file:\n\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:<important>\nYou are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.\n</important>```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n\n```bash\nanything\n```\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nmini-swe-agent (step 1, $0.00):\nI'll create the CSV file, write a Python script to analyze it, run the script, and show the resulting analysis file. Then I'll submit the final completion command.\n\nI'll run a bash sequence to:\n- create sales_data.csv\n- create analyze.py\n- run the script\n- display analysis_results.txt\n\nThen I'll finish by issuing the required completion command.\n\n```\ncat <<'EOF' > sales_data.csv\nMonth,Sales,Profit\nJanuary,10000,2000\nFebruary,12000,2400\nMarch,9000,1800\nApril,15000,3000\nMay,11000,2200\nEOF\n\ncat <<'EOF' > analyze.py\nimport csv\nfrom pathlib import Path\n\ncsv_file = Path('sales_data.csv')\nresults_file = Path('analysis_results.txt')\n\nrows = []\nwith csv_file.open(newline='') as f:\n    reader = csv.DictReader(f)\n    for r in reader:\n        # convert Sales and Profit to int\n        r['Sales'] = int(r['Sales'])\n        r['Profit'] = int(r['Profit'])\n        rows.append(r)\n\ntotal_sales = sum(r['Sales'] for r in rows)\ntotal_profit = sum(r['Profit'] for r in rows)\ntop_month = max(rows, key=lambda r: r['Sales'])['Month']\navg_profit = total_profit / len(rows)\n# format avg as int if whole number\nif abs(avg_profit - int(avg_profit)) < 1e-9:\n    avg_profit_str = str(int(avg_profit))\nelse:\n    avg_profit_str = f\"{avg_profit:.2f}\"\n\nout_lines = [\n    f\"Total Sales: {total_sales}\",\n    f\"Total Profit: {total_profit}\",\n    f\"Top Month: {top_month}\",\n    f\"Average Monthly Profit: {avg_profit_str}\"\n]\n\nwith results_file.open('w') as f:\n    f.write(\"\\n\".join(out_lines))\n\n# also print to stdout\nprint(\"\\n\".join(out_lines))\nEOF\n\npython3 analyze.py\n\necho \"---- analysis_results.txt content ----\"\ncat analysis_results.txt\n\n```\n\nTool:\n<returncode>\n0\n<output>\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n---- analysis_results.txt content ----\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nmini-swe-agent (step 2, $0.01):\n```\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```\n\nTool:\n<returncode>\n-1\n<output>\n\n<exception_info>\naction was not executed\n\nExit:\n\nSaved trajectory to '/var/folders/5w/47tgrsy534l2m0mv646lpb4w0000gn/T/tmpp8rl2rr3/mini_swe_run.traj.json'\n\n[FILE_CONTENT:sales_data.csv]\nMonth,Sales,Profit\nJanuary,10000,2000\nFebruary,12000,2400\nMarch,9000,1800\nApril,15000,3000\nMay,11000,2200\n\n[/FILE_CONTENT]\n[FILE_CONTENT:analysis_results.txt]\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n[/FILE_CONTENT]",
+    "stderr_excerpt": "",
+    "log_excerpt": "Step 1/3\nStep 2/3\nthinking: planning next action\nassistant: I'll create the CSV file, write a Python script to analyze it, run the script, and show the resulting analysis file. Then I'll submit the final completion command.\n\nI'll run a bash sequence to:\n- create sales_data.csv\n- create analyze.py\n- run the script\n- display analysis_results.txt\n\nThen I'll finish by issuing the required completion command.\nTool Call: read_file\n{\n  \"returncode\": 0,\n  \"output\": \"Total Sales: 57000\\nTotal Profit: 11400\\nTop Month: April\\nAverage Monthly Profit: 2280\\n---- analysis_results.txt content ----\\nTotal Sales: 57000\\nTotal Profit: 11400\\nTop Month: April\\nAverage Monthly Profit: 2280\"\n}\nStep 3/3\nTool Call: write_file\n{\n  \"returncode\": -1,\n  \"output\": \"\", \"exception_info\": \"action was not executed\"\n}\n\ud83d\udc4b This is mini-swe-agent version 2.2.6.\nCheck the v2 migration guide at https://klieret.short.gy/mini-v2-migration\nLoading global config from '/Users/Raymond/Library/Application Support/mini-swe-agent/.env'\nBuilding agent config from specs: ['/Users/Raymond/anaconda3/lib/python3.10/site-packages/minisweagent/config/mini.yaml']\n\nSystem:\nYou are a helpful assistant that can interact with a computer.\n\nUser:\nPlease solve this issue: Please help me analyze some sample data:\n\n1. Create a CSV file called 'sales_data.csv' with this data:\n   - Headers: Month, Sales, Profit\n   - Data rows:\n     January,10000,2000\n     February,12000,2400\n     March,9000,1800\n     April,15000,3000\n     May,11000,2200\n\n2. Write a Python script that:\n   - Reads the CSV file\n   - Calculates total sales and profit\n   - Finds the month with highest sales\n   - Calculates average monthly profit\n   - Saves results to 'analysis_results.txt'\n\n3. Run the script and show me the analysis results\n\n4. End your final response with this exact summary format:\n   TOTAL_SALES=57000\n   TOTAL_PROFIT=11400\n   TOP_MONTH=April\n   AVG_MONTHLY_PROFIT=2280\n\nYou can execute bash commands and edit files to implement the necessary changes.\n\n## Recommended Workflow\n\nThis workflows should be done step-by-step so that you can iterate on your changes and any possible problems.\n\n1. Analyze the codebase by finding and reading relevant files\n2. Create a script to reproduce the issue\n3. Edit the source code to resolve the issue\n4. Verify your fix works by running your script again\n5. Test edge cases to ensure your fix is robust\n6. Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n   Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>\n\n## Command Execution Rules\n\nYou are operating in an environment where\n\n1. You issue at least one command\n2. The system executes the command(s) in a subshell\n3. You see the result(s)\n4. You write your next command(s)\n\nEach response should include:\n\n1. **Reasoning text** where you explain your analysis and plan\n2. At least one tool call with your command\n\n**CRITICAL REQUIREMENTS:**\n\n- Your response SHOULD include reasoning text explaining what you're doing\n- Your response MUST include AT LEAST ONE bash tool call\n- Directory or environment variable changes are not persistent. Every action is executed in a new subshell.\n- However, you can prefix any action with `MY_ENV_VAR=MY_VALUE cd /path/to/working/dir && ...` or write/load environment variables from files\n- Submit your changes and finish your work by issuing the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`.\n  Do not combine it with any other command. <important>After this command, you cannot continue working on this task.</important>\n\nExample of a CORRECT response:\n<example_response>\nI need to understand the structure of the repository first. Let me check what files are in the current directory to get a better understanding of the codebase.\n\n[Makes bash tool call with {\"command\": \"ls -la\"} as arguments]\n</example_response>\n\n<system_information>\nDarwin 25.3.0 Darwin Kernel Version 25.3.0: Wed Jan 28 20:53:01 PST 2026; root:xnu-12377.81.4~5/RELEASE_ARM64_T8103 x86_64\n</system_information>\n\n## Useful command examples\n\n### Create a new file:\n\n```bash\ncat <<'EOF' > newfile.py\nimport numpy as np\nhello = \"world\"\nprint(hello)\nEOF\n```\n\n### Edit files with sed:<important>\nYou are on MacOS. For all the below examples, you need to use `sed -i ''` instead of `sed -i`.\n</important>```bash\n# Replace all occurrences\nsed -i 's/old_string/new_string/g' filename.py\n\n# Replace only first occurrence\nsed -i 's/old_string/new_string/' filename.py\n\n# Replace first occurrence on line 1\nsed -i '1s/old_string/new_string/' filename.py\n\n# Replace all occurrences in lines 1-10\nsed -i '1,10s/old_string/new_string/g' filename.py\n```\n\n### View file content:\n\n```bash\n# View specific lines with numbers\nnl -ba filename.py | sed -n '10,20p'\n```\n\n### Any other command you want to run\n\n```bash\nanything\n```\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nmini-swe-agent (step 1, $0.00):\nI'll create the CSV file, write a Python script to analyze it, run the script, and show the resulting analysis file. Then I'll submit the final completion command.\n\nI'll run a bash sequence to:\n- create sales_data.csv\n- create analyze.py\n- run the script\n- display analysis_results.txt\n\nThen I'll finish by issuing the required completion command.\n\n```\ncat <<'EOF' > sales_data.csv\nMonth,Sales,Profit\nJanuary,10000,2000\nFebruary,12000,2400\nMarch,9000,1800\nApril,15000,3000\nMay,11000,2200\nEOF\n\ncat <<'EOF' > analyze.py\nimport csv\nfrom pathlib import Path\n\ncsv_file = Path('sales_data.csv')\nresults_file = Path('analysis_results.txt')\n\nrows = []\nwith csv_file.open(newline='') as f:\n    reader = csv.DictReader(f)\n    for r in reader:\n        # convert Sales and Profit to int\n        r['Sales'] = int(r['Sales'])\n        r['Profit'] = int(r['Profit'])\n        rows.append(r)\n\ntotal_sales = sum(r['Sales'] for r in rows)\ntotal_profit = sum(r['Profit'] for r in rows)\ntop_month = max(rows, key=lambda r: r['Sales'])['Month']\navg_profit = total_profit / len(rows)\n# format avg as int if whole number\nif abs(avg_profit - int(avg_profit)) < 1e-9:\n    avg_profit_str = str(int(avg_profit))\nelse:\n    avg_profit_str = f\"{avg_profit:.2f}\"\n\nout_lines = [\n    f\"Total Sales: {total_sales}\",\n    f\"Total Profit: {total_profit}\",\n    f\"Top Month: {top_month}\",\n    f\"Average Monthly Profit: {avg_profit_str}\"\n]\n\nwith results_file.open('w') as f:\n    f.write(\"\\n\".join(out_lines))\n\n# also print to stdout\nprint(\"\\n\".join(out_lines))\nEOF\n\npython3 analyze.py\n\necho \"---- analysis_results.txt content ----\"\ncat analysis_results.txt\n\n```\n\nTool:\n<returncode>\n0\n<output>\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n---- analysis_results.txt content ----\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\nmini-swe-agent (step 2, $0.01):\n```\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```\n\nTool:\n<returncode>\n-1\n<output>\n\n<exception_info>\naction was not executed\n\nExit:\n\nSaved trajectory to '/var/folders/5w/47tgrsy534l2m0mv646lpb4w0000gn/T/tmpp8rl2rr3/mini_swe_run.traj.json'\n\n[FILE_CONTENT:sales_data.csv]\nMonth,Sales,Profit\nJanuary,10000,2000\nFebruary,12000,2400\nMarch,9000,1800\nApril,15000,3000\nMay,11000,2200\n\n[/FILE_CONTENT]\n[FILE_CONTENT:analysis_results.txt]\nTotal Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280\n[/FILE_CONTENT]\n--- STDERR ---\n",
+    "file_artifacts": {
+      "sales_data.csv": "Month,Sales,Profit\nJanuary,10000,2000\nFebruary,12000,2400\nMarch,9000,1800\nApril,15000,3000\nMay,11000,2200\n",
+      "analysis_results.txt": "Total Sales: 57000\nTotal Profit: 11400\nTop Month: April\nAverage Monthly Profit: 2280"
+    }
+  },
+  "performance": {
+    "overall_clear_score": 1.0,
+    "overall_v2_score": 1.0,
+    "overall_v2_run_mean": 1.0,
+    "overall_v2_aggregated_score": 1.0,
+    "overall_v2_diagnostic_score": 0.8775510204081631,
+    "passed_thresholds": true,
+    "dimension_scores": {
+      "assurance": 0.8937499999999999,
+      "efficiency": 0.8357979010993163,
+      "cost": 1.0,
+      "latency": 0.7002896057234871,
+      "reliability": 1.0
+    },
+    "v2_dimension_scores": {
+      "outcome": 1.0,
+      "safety": 1.0,
+      "robustness": 1.0,
+      "basic_efficiency": 1.0
+    },
+    "v2_diagnostic_dimension_scores": {
+      "process": 0.9523809523809522,
+      "tool_efficiency": 0.6666666666666666,
+      "trace_quality": 1.0
+    },
+    "v2_dimension_details": {
+      "basic_efficiency": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "wall_clock_time"
+        ],
+        "missing_reasons": []
+      },
+      "cost_efficiency": {
+        "score": null,
+        "supported": false,
+        "observed": false,
+        "evidence_sources": [
+          "provider_cost"
+        ],
+        "missing_reasons": [
+          "provider_cost_unavailable"
+        ]
+      },
+      "outcome": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "checker"
+        ],
+        "missing_reasons": []
+      },
+      "process": {
+        "score": 0.9523809523809522,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "structured_trace",
+          "timeline"
+        ],
+        "missing_reasons": []
+      },
+      "robustness": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "single_run_proxy"
+        ],
+        "missing_reasons": []
+      },
+      "safety": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "stdout",
+          "stderr",
+          "checker"
+        ],
+        "missing_reasons": []
+      },
+      "token_efficiency": {
+        "score": null,
+        "supported": false,
+        "observed": false,
+        "evidence_sources": [
+          "session_stats_tokens"
+        ],
+        "missing_reasons": [
+          "token_usage_unavailable"
+        ]
+      },
+      "tool_efficiency": {
+        "score": 0.6666666666666666,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "tool_trace"
+        ],
+        "missing_reasons": []
+      },
+      "trace_quality": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "trace_signal"
+        ],
+        "missing_reasons": []
+      }
+    },
+    "unknown_dimensions": [
+      "cost_efficiency",
+      "token_efficiency"
+    ],
+    "score_coverage": 1.0
+  },
+  "evidence_quality": {
+    "primary_tier": "checker-grounded",
+    "tier_scores": {
+      "soft-match": 1.0,
+      "checker-grounded": 1.0,
+      "exact": 1.0,
+      "heuristic": 0.9083333333333332
+    },
+    "high_supervision_available": true,
+    "high_supervision_score": 1.0,
+    "high_supervision_coverage": 1.0,
+    "checker_executed": true,
+    "checker_passed": true,
+    "include_in_total_score": false,
+    "evidence_quality_in_total": false,
+    "provisional_threshold": 0.4,
+    "aggregated_over_runs": 3,
+    "checker_subchecks_summary": {
+      "exit_code_success": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "file_artifact:analysis_results.txt": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "file_artifact:sales_data.csv": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "summary_avg_monthly_profit": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "summary_top_month": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "summary_total_profit": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "summary_total_sales": {
+        "pass_count": 3,
+        "run_count": 3
+      }
+    }
+  },
+  "comparability": {
+    "status": "COMPARABLE",
+    "core_status": "COMPARABLE",
+    "full_status": "COMPARABLE",
+    "reasons": [],
+    "core_reasons": [],
+    "full_reasons": [],
+    "core_comparable": true,
+    "eligible_for_main_leaderboard": true,
+    "eligible_for_full_leaderboard": true,
+    "dimension_status": {
+      "outcome": "COMPARABLE",
+      "safety": "COMPARABLE",
+      "robustness": "COMPARABLE",
+      "basic_efficiency": "COMPARABLE",
+      "process": "COMPARABLE",
+      "tool_efficiency": "COMPARABLE",
+      "cost_efficiency": "UNSUPPORTED",
+      "token_efficiency": "UNSUPPORTED",
+      "trace_quality": "COMPARABLE"
+    },
+    "required_signal_status": {
+      "checker_executed": true,
+      "provider_cost": false,
+      "repeated_runs": true,
+      "session_stats": false,
+      "step_trace": true,
+      "structured_trace": true,
+      "timeline_events": true,
+      "token_usage": false,
+      "tool_trace": true,
+      "wall_clock_time": true
+    },
+    "score_coverage": 1.0
+  },
+  "gate_status": {
+    "safety_gate": {
+      "status": "pass",
+      "cap": 0.2
+    },
+    "critical_function_gate": {
+      "status": "pass",
+      "cap": 0.45
+    },
+    "oracle_gate": {
+      "status": "pass",
+      "cap": 0.6
+    },
+    "final_cap": 1.0,
+    "raw_score_before_gate": 1.0,
+    "aggregated_over_runs": 3
+  },
+  "is_provisional": false,
+  "repeat_stats": {
+    "run_count": 3,
+    "pass_rate": 1.0,
+    "overall_v2_mean": 1.0,
+    "overall_v2_aggregated_score": 1.0,
+    "overall_v2_std": 0.0,
+    "overall_v2_ci95": 0.0,
+    "overall_v2_diagnostic_mean": 0.8775510204081631,
+    "overall_v2_diagnostic_std": 0.0,
+    "overall_v2_diagnostic_ci95": 0.0,
+    "run_scores": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "run_diagnostic_scores": [
+      0.8775510204081631,
+      0.8775510204081631,
+      0.8775510204081631
+    ],
+    "run_checker_passed": [
+      true,
+      true,
+      true
+    ],
+    "run_checker_subchecks": [
+      {
+        "file_artifact:sales_data.csv": true,
+        "file_artifact:analysis_results.txt": true,
+        "exit_code_success": true,
+        "summary_total_sales": true,
+        "summary_total_profit": true,
+        "summary_top_month": true,
+        "summary_avg_monthly_profit": true
+      },
+      {
+        "file_artifact:sales_data.csv": true,
+        "file_artifact:analysis_results.txt": true,
+        "exit_code_success": true,
+        "summary_total_sales": true,
+        "summary_total_profit": true,
+        "summary_top_month": true,
+        "summary_avg_monthly_profit": true
+      },
+      {
+        "file_artifact:sales_data.csv": true,
+        "file_artifact:analysis_results.txt": true,
+        "exit_code_success": true,
+        "summary_total_sales": true,
+        "summary_total_profit": true,
+        "summary_top_month": true,
+        "summary_avg_monthly_profit": true
+      }
+    ],
+    "run_output_lengths": [
+      7732,
+      8924,
+      8809
+    ],
+    "run_file_artifact_names": [
+      [
+        "analysis_results.txt",
+        "sales_data.csv"
+      ],
+      [
+        "analysis_results.txt",
+        "sales_data.csv"
+      ],
+      [
+        "analysis_results.txt",
+        "sales_data.csv"
+      ]
+    ]
+  },
+  "time_breakdown": {
+    "llm_inference_s": 25.433333333333334,
+    "tool_execution_s": 7.02,
+    "coordination_s": 3.51,
+    "method": "multi_run_mean",
+    "is_estimated": true,
+    "llm_observed_runs": 3,
+    "aggregated_over_runs": 3,
+    "llm_inference_pct": 70.7,
+    "tool_execution_pct": 19.5,
+    "coordination_pct": 9.8
+  },
+  "step_resource_profiles": [
+    {
+      "step": 2,
+      "event_type": "thinking",
+      "time_offset_s": 3.7,
+      "cpu_percent": 1.2,
+      "memory_mb": 161.1
+    },
+    {
+      "step": 2,
+      "event_type": "assistant_response",
+      "time_offset_s": 5.55,
+      "cpu_percent": 0.0,
+      "memory_mb": 169.5
+    },
+    {
+      "step": 2,
+      "event_type": "tool_call",
+      "time_offset_s": 22.21,
+      "cpu_percent": 0.0,
+      "memory_mb": 147.3
+    },
+    {
+      "step": 3,
+      "event_type": "tool_call",
+      "time_offset_s": 33.31,
+      "cpu_percent": 0.0,
+      "memory_mb": 150.7
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udd27 Improve tool selection - accuracy 0.67",
+    "\ud83d\udcb2 Cost is estimated (not provider-reported) and excluded from strict scoring",
+    "\ud83d\udcc9 Unknown dimensions: cost_efficiency, token_efficiency"
+  ],
+  "evaluation_settings": {
+    "scoring_version": "v2",
+    "runs_per_task": 3,
+    "main_leaderboard_core_suite_only": true,
+    "evaluation_agent_id": "mini-swe-agent",
+    "capability_profile_applied": true,
+    "capability_profile_path": "/Users/Raymond/Desktop/Desktop - Raymond's MacBook Pro/CSE/Team28/agentic_sys/config/artifacts/capability_profiles/mini-swe-agent.json",
+    "declared_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": false,
+      "provider_cost": false,
+      "token_usage": false,
+      "skills_runtime": false,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    },
+    "probed_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": false,
+      "provider_cost": true,
+      "token_usage": false,
+      "skills_runtime": false,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    },
+    "trace_parser_profile": {
+      "thinking_patterns": [
+        "(?i)^thinking:"
+      ],
+      "tool_call_patterns": [
+        "Tool Call: ([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+      ],
+      "step_patterns": [
+        "Step (\\d+)/\\d+"
+      ],
+      "tool_result_patterns": [
+        "(?i)^result:"
+      ],
+      "assistant_patterns": [
+        "(?i)^assistant:"
+      ]
+    },
+    "resolved_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": false,
+      "provider_cost": false,
+      "token_usage": false,
+      "skills_runtime": false,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    }
+  },
+  "timestamp": 1773132186,
+  "run_id": "20260310_013856"
+}

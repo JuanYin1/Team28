@@ -1,5 +1,0 @@
-test_case,main_v2_score,core_status,eligible_for_main_leaderboard,is_provisional
-simple_file_operations,0.972039,SOFT_NON_COMPARABLE,False,True
-python_coding_task,0.960000,SOFT_NON_COMPARABLE,False,True
-data_analysis_task,0.933065,SOFT_NON_COMPARABLE,False,True
-error_handling_test,0.990803,SOFT_NON_COMPARABLE,False,True
