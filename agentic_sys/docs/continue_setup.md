@@ -5,6 +5,8 @@ Repository defaults:
 - config: `continuedev/default-cli-config`
 - model: `anthropic/claude-haiku-4-5`
 
+Run the commands below from `agentic_sys/` unless noted otherwise.
+
 ## 1) Install
 
 ```bash
@@ -19,12 +21,20 @@ If needed:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
+Success looks like:
+- `which cn` prints a real path,
+- `cn --version` exits cleanly,
+- the same shell can run repo scripts and `cn`.
+
 ## 2) Configure API Key
 
 ```bash
 echo 'export CONTINUE_API_KEY="<ORG_SCOPED_KEY>"' >> ~/.zshrc
 source ~/.zshrc
 ```
+
+Minimum requirement:
+- `CONTINUE_API_KEY` must be available in the shell where you run evaluation commands.
 
 ## 3) Quick Health Check
 
@@ -41,6 +51,11 @@ cn -p "Reply with exactly OK and nothing else." --auto
 python verify_continue_setup.py
 ```
 
+Expected result:
+- `verify_agent_setup.py --agent continue` should pass without sending a model request,
+- the optional live request should return `OK`,
+- `verify_continue_setup.py` should confirm the CLI can complete a real prompt.
+
 ## 4) Recommended Evaluation Run
 
 ```bash
@@ -52,6 +67,11 @@ Mode notes:
 - `--refresh-capability-profile`: probe then evaluate.
 - `--probe-agent`: same as refresh.
 - `--probe-only`: probe only.
+
+Expected artifacts after phase3:
+- `artifacts/continue/phase3/*_run_manifest_*.json`
+- `artifacts/continue/phase3/*_clear_report_*.md`
+- `artifacts/continue/phase3/*_leaderboard_*.csv`
 
 ## 5) Full Comparability Expectations
 
@@ -69,6 +89,8 @@ Check task JSON/report field:
   - check `CONTINUE_API_KEY`, config, model availability.
 - `cn: command not found`
   - fix PATH.
+- live prompt health check hangs or fails
+  - verify the CLI can access the configured workspace/model from your account.
 - `full comparable` still low
   - rerun `--refresh-capability-profile`.
   - inspect `config/artifacts/capability_profiles/continue.json`.
