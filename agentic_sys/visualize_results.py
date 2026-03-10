@@ -273,6 +273,26 @@ def plot_gantt_timeline(ax: plt.Axes, result: Dict[str, Any]) -> None:
 
     spans = _step_spans(profiles)
 
+    # Some runtimes emit sparse/overlapped events that do not form explicit
+    # llm/tool spans. Build a coarse fallback span per step to keep plotting robust.
+    if not spans:
+        grouped: Dict[str, List[float]] = {}
+        for p in profiles:
+            step = p.get("step")
+            label = "Init" if step is None else "Step %d" % step
+            grouped.setdefault(label, []).append(p["time_offset_s"])
+        for label, times in sorted(grouped.items()):
+            start = min(times)
+            end = max(times)
+            if end <= start:
+                end = start + 0.05
+            spans.append({
+                "step": label,
+                "phase": "coordination" if label != "Init" else "init",
+                "start_s": start,
+                "end_s": end,
+            })
+
     # Build ordered y-axis labels
     y_labels: List[str] = []
     seen_labels = set()
@@ -333,9 +353,10 @@ def plot_gantt_timeline(ax: plt.Axes, result: Dict[str, Any]) -> None:
                    s=50, zorder=5, edgecolors="white", linewidths=0.4)
 
     # Vertical grid every 5 s
+    grid_label_y = (len(y_labels) - 0.2) if y_labels else 0.0
     for t_g in range(0, int(total_t) + 6, 5):
         ax.axvline(t_g, color="#e8e8e8", linewidth=0.6, zorder=0)
-        ax.text(t_g, len(y_labels) - 0.2, "%ds" % t_g,
+        ax.text(t_g, grid_label_y, "%ds" % t_g,
                 ha="center", va="bottom", fontsize=7, color="#999")
 
     ax.set_xlim(-0.5, total_t * 1.04)
@@ -348,11 +369,12 @@ def plot_gantt_timeline(ax: plt.Axes, result: Dict[str, Any]) -> None:
         % (len(profiles), total_t),
         fontsize=11,
     )
-    ax.legend(
-        handles=list(legend_handles.values()),
-        loc="lower right", fontsize=8, framealpha=0.9,
-        ncol=min(4, len(legend_handles)),
-    )
+    if legend_handles:
+        ax.legend(
+            handles=list(legend_handles.values()),
+            loc="lower right", fontsize=8, framealpha=0.9,
+            ncol=max(1, min(4, len(legend_handles))),
+        )
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
 
