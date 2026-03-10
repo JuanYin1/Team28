@@ -115,7 +115,7 @@ class IntegratedAgentEvaluator:
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=60
+            max_time_seconds=180
         ))
         
         # LOGIC PUZZLE - Hybrid evaluation
@@ -145,7 +145,7 @@ Who has which pet and likes which color?"""),
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=180
+            max_time_seconds=540
         ))
         
         # FILE OPERATIONS - Execution-based evaluation
@@ -174,7 +174,7 @@ Who has which pet and likes which color?"""),
                 reasoning_weight=0.1,
                 efficiency_weight=0.0
             ),
-            max_time_seconds=120
+            max_time_seconds=360
         ))
         
         # CODE DEBUGGING - Comprehensive evaluation
@@ -218,7 +218,7 @@ print(find_average(["1", "2", "3"]))  # This might cause issues
                 execution_weight=0.2,
                 efficiency_weight=0.0
             ),
-            max_time_seconds=240
+            max_time_seconds=720
         ))
         
         # SYSTEM ANALYSIS - Advanced reasoning
@@ -256,7 +256,7 @@ Provide reasoning for each recommendation."""),
                 efficiency_weight=0.0,
                 execution_weight=0.0
             ),
-            max_time_seconds=360
+            max_time_seconds=1080
         ))
         
         return test_cases

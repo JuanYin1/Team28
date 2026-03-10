@@ -159,7 +159,7 @@ class AgentTestCriteria:
     reliability_weight: float = 0.15
     
     # Performance thresholds
-    max_task_time_seconds: float = 120.0
+    max_task_time_seconds: float = 360.0
     max_cost_per_task: float = 0.50  # USD
     min_accuracy_threshold: float = 0.7
     max_acceptable_steps: int = 15

@@ -1,0 +1,36 @@
+{
+  "schema_version": "phase1.v3",
+  "test_case": {
+    "name": "logic_puzzle",
+    "category": "reasoning",
+    "complexity": "medium",
+    "description": "Multi-step logic puzzle requiring systematic reasoning",
+    "task_prompt": "Return only 6-10 sentences of analysis. Do not generate deliverable documents. Do not write files.\n\nSolve this logic puzzle step by step:\n\nThree friends (Alex, Blake, Casey) each own a different pet (cat, dog, bird) and prefer different colors (red, blue, green).\n\nClues:\n1. Alex doesn't like red\n2. The person with the cat likes blue  \n3. Blake has a dog\n4. Casey doesn't like green\n5. The person who likes red has a bird\n\nWho has which pet and likes which color?",
+    "max_time_seconds": 540
+  },
+  "execution": {
+    "total_execution_time": 4.511500120162964,
+    "execution_success": true,
+    "agent_error": null,
+    "full_agent_output": "I'll solve this logic puzzle step by step using the given clues.\n\n**Step 1:** From clue 3, Blake has a dog.\n\n**Step 2:** Since Blake has the dog, and there are three pets (cat, dog, bird), Alex and Casey must have the cat and bird (in some order).\n\n**Step 3:** From clue 5, the person who likes red has a bird. From clue 1, Alex doesn't like red, so Alex doesn't have the bird. Therefore, **Casey has the bird and likes red**.\n\n**Step 4:** Since Casey has the bird, **Alex has the cat**.\n\n**Step 5:** From clue 2, the person with the cat likes blue. Since Alex has the cat, **Alex likes blue**.\n\n**Step 6:** From clue 4, Casey doesn't like green. We know Casey likes red (from Step 3), which is consistent. This leaves green for Blake.\n\n**Solution: Alex has a cat and likes blue; Blake has a dog and likes green; Casey has a bird and likes red.** The puzzle demonstrates logical deduction where each clue progressively eliminates possibilities until unique assignments emerge for all three friends.\n",
+    "full_agent_error": null,
+    "output_length": 999,
+    "output_preview": "I'll solve this logic puzzle step by step using the given clues.\n\n**Step 1:** From clue 3, Blake has a dog.\n\n**Step 2:** Since Blake has the dog, and there are three pets (cat, dog, bird), Alex and Casey must have the cat and bird (in some order).\n\n**Step 3:** From clue 5, the person who likes red has a bird. From clue 1, Alex doesn't like red, so Alex doesn't have the bird. Therefore, **Casey has the bird and likes red**.\n\n**Step 4:** Since Casey has the bird, **Alex has the cat**.\n\n**Step 5:**..."
+  },
+  "evaluation": {
+    "overall_score": 0.7955555555555556,
+    "passed": true,
+    "confidence": 0.8999999999999999,
+    "correctness_score": 1.0,
+    "completeness_score": 0.7777777777777778,
+    "reasoning_score": 0.6000000000000001,
+    "efficiency_score": 1.0,
+    "execution_score": 0.7,
+    "failed_criteria": [],
+    "detailed_reasoning": "Overall Score: 0.80 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.4)\n\u2022 Completeness: 0.78 (weight: 0.2)\n\u2022 Reasoning Quality: 0.60 (weight: 0.4)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 0.70 (weight: 0.0)\n\nStrengths: Strong factual correctness, Efficient execution time\n\nConfidence: 0.90"
+  },
+  "summary": {
+    "overall_success": true,
+    "confidence_score": 0.8999999999999999
+  }
+}

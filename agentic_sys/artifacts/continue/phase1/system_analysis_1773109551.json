@@ -1,0 +1,38 @@
+{
+  "schema_version": "phase1.v3",
+  "test_case": {
+    "name": "system_analysis",
+    "category": "analysis",
+    "complexity": "complex",
+    "description": "Analyze system architecture and propose improvements",
+    "task_prompt": "Return only 6-10 sentences of analysis. Do not generate deliverable documents. Do not write files.\n\nYou are analyzing a simple web application architecture:\n\nCurrent setup:\n- Frontend: Single-page React app\n- Backend: Node.js REST API \n- Database: PostgreSQL\n- Hosting: Single server\n\nThe application is experiencing:\n- Slow response times during peak hours\n- Occasional crashes under load\n- Difficulty deploying updates\n\nAnalyze this architecture and propose specific improvements for:\n1. Performance optimization\n2. Scalability enhancements  \n3. Reliability improvements\n4. Deployment process\n\nProvide reasoning for each recommendation.",
+    "max_time_seconds": 1080
+  },
+  "execution": {
+    "total_execution_time": 6.571027755737305,
+    "execution_success": true,
+    "agent_error": null,
+    "full_agent_output": "The current monolithic single-server architecture is a bottleneck causing performance degradation during peak hours. Implementing horizontal scaling through load balancing (e.g., Nginx or AWS ELB) and containerizing the Node.js backend with Docker/Kubernetes enables automatic scaling based on demand, directly addressing crashes and slow response times. For the database layer, introduce read replicas for PostgreSQL to distribute query load, implement connection pooling (PgBouncer), and add caching with Redis to reduce database hits\u2014these changes dramatically improve response times without requiring application rewrites. To solve deployment friction, adopt a CI/CD pipeline (GitHub Actions, GitLab CI, or Jenkins) that automates testing and deploys to a staging environment before production, paired with blue-green or canary deployments to minimize downtime and enable quick rollbacks if issues arise. Separate the React frontend into a CDN-hosted static asset (CloudFront, Cloudflare) while the API runs on auto-scaling compute instances, allowing independent scaling of frontend and backend based on actual demand patterns. Add comprehensive monitoring with tools like Prometheus/Grafana and structured logging (ELK stack or Datadog) to identify bottlenecks before they cause crashes, enabling proactive scaling and faster incident response. These incremental improvements transform the architecture from a single point of failure into a resilient, scalable system while keeping operational complexity manageable.\n",
+    "full_agent_error": null,
+    "output_length": 1523,
+    "output_preview": "The current monolithic single-server architecture is a bottleneck causing performance degradation during peak hours. Implementing horizontal scaling through load balancing (e.g., Nginx or AWS ELB) and containerizing the Node.js backend with Docker/Kubernetes enables automatic scaling based on demand, directly addressing crashes and slow response times. For the database layer, introduce read replicas for PostgreSQL to distribute query load, implement connection pooling (PgBouncer), and add cachin..."
+  },
+  "evaluation": {
+    "overall_score": 0.515,
+    "passed": false,
+    "confidence": 0.8999999999999999,
+    "correctness_score": 0.625,
+    "completeness_score": 0.8,
+    "reasoning_score": 0.30000000000000004,
+    "efficiency_score": 1.0,
+    "execution_score": 0.7,
+    "failed_criteria": [
+      "reasoning_quality"
+    ],
+    "detailed_reasoning": "Overall Score: 0.52 (FAIL)\n\nComponent Breakdown:\n\u2022 Correctness: 0.62 (weight: 0.2)\n\u2022 Completeness: 0.80 (weight: 0.3)\n\u2022 Reasoning Quality: 0.30 (weight: 0.5)\n\u2022 Efficiency: 1.00 (weight: 0.0)\n\u2022 Execution: 0.70 (weight: 0.0)\n\nStrengths: Efficient execution time\nAreas for improvement: Weak reasoning demonstration\n\nConfidence: 0.90"
+  },
+  "summary": {
+    "overall_success": false,
+    "confidence_score": 0.8999999999999999
+  }
+}

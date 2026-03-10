@@ -1,0 +1,96 @@
+{
+  "schema_version": "phase2.v3",
+  "test_info": {
+    "name": "arithmetic_reasoning",
+    "category": "reasoning",
+    "complexity": "simple",
+    "description": "Basic arithmetic with step-by-step reasoning",
+    "max_time_seconds": 180
+  },
+  "execution": {
+    "total_time": 92.64879059791565,
+    "success": true,
+    "error": "[initial pipe-mode error]\nTraceback (most recent call last):\n  File \"<frozen runpy>\", line 198, in _run_module_as_main\n  File \"<frozen runpy>\", line 88, in _run_code\n  File \"c:\\users\\incisors\\appdata\\local\\packages\\pythonsoftwarefoundation.python.3.12_qbz5n2kfra8p0\\localcache\\local-packages\\python312\\scripts\\mini.exe\\__main__.py\", line 2, in <module>\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\minisweagent\\run\\mini.py\", line 15, in <module>\n    from minisweagent.agents.utils.prompt_user import _multiline_prompt\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\minisweagent\\agents\\utils\\prompt_user.py\", line 8, in <module>\n    prompt_session = PromptSession(history=_history)\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\shortcuts\\prompt.py\", line 483, in __init__\n    self.app = self._create_application(editing_mode, erase_when_done)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\shortcuts\\prompt.py\", line 744, in _create_application\n    application: Application[_T] = Application(\n                                   ^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\application\\application.py\", line 267, in __init__\n    self.output = output or session.output\n                            ^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\application\\current.py\", line 67, in output\n    self._output = create_output()\n                   ^^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\output\\defaults.py\", line 91, in create_output\n    return Win32Output(stdout, default_color_depth=color_depth_from_env)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\output\\win32.py\", line 115, in __init__\n    info = self.get_win32_screen_buffer_info()\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\incisors\\AppData\\Local\\Packages\\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\\LocalCache\\local-packages\\Python312\\site-packages\\prompt_toolkit\\output\\win32.py\", line 219, in get_win32_screen_buffer_info\n    raise NoConsoleScreenBufferError\nprompt_toolkit.output.win32.NoConsoleScreenBufferError: No Windows console found. Are you running cmd.exe?\n",
+    "output_length": 1505
+  },
+  "evaluation": {
+    "overall_score": 0.71,
+    "pass_threshold": 0.7,
+    "correctness_score": 1.0,
+    "completeness_score": 0.0,
+    "reasoning_score": 0.7,
+    "efficiency_score": 0.3,
+    "execution_score": 1.0,
+    "passed": true,
+    "confidence": 0.5,
+    "reasoning": "Overall Score: 0.71 (PASS)\n\nComponent Breakdown:\n\u2022 Correctness: 1.00 (weight: 0.5)\n\u2022 Completeness: 0.00 (weight: 0.2)\n\u2022 Reasoning Quality: 0.70 (weight: 0.3)\n\u2022 Efficiency: 0.30 (weight: 0.0)\n\u2022 Execution: 1.00 (weight: 0.0)\n\nStrengths: Strong factual correctness\nAreas for improvement: Slow execution performance\n\nConfidence: 0.50",
+    "failed_criteria": [
+      "completeness",
+      "efficiency"
+    ],
+    "evidence": null
+  },
+  "performance_monitoring": {
+    "monitoring_duration": 92.48564124107361,
+    "sample_count": 250,
+    "avg_cpu_percent": 5.276,
+    "max_cpu_percent": 20.6,
+    "cpu_bottleneck_duration": 0.0,
+    "cpu_core_imbalance": 103.6497264,
+    "avg_memory_percent": 41.352,
+    "max_memory_percent": 41.8,
+    "memory_growth_rate": 0.7303920948541811,
+    "swap_usage_detected": true,
+    "total_disk_read_mb": 0.35546875,
+    "total_disk_write_mb": 37.76171875,
+    "avg_disk_throughput_mbps": 0.4121416793839761,
+    "disk_bottleneck_detected": false,
+    "total_network_mb": 0.5262012481689453,
+    "avg_network_throughput_mbps": 0.005689545329499809,
+    "network_pattern": "idle",
+    "process_peak_memory_mb": 8.54296875,
+    "process_avg_cpu": 0.0,
+    "process_thread_growth": -5,
+    "primary_bottleneck": "balanced",
+    "bottleneck_confidence": 0.5864800000000001,
+    "bottleneck_details": {
+      "cpu_analysis": {
+        "avg_usage": 5.276,
+        "peak_usage": 20.6,
+        "bottleneck_duration_percent": 0.0,
+        "core_imbalance": 103.6497264
+      },
+      "memory_analysis": {
+        "avg_usage": 41.352,
+        "peak_usage": 41.8,
+        "growth_rate_mb_per_sec": 0.7303920948541811,
+        "swap_usage": true
+      },
+      "disk_analysis": {
+        "total_read_mb": 0.35546875,
+        "total_write_mb": 37.76171875,
+        "avg_throughput_mbps": 0.4121416793839761,
+        "bottleneck_detected": false
+      },
+      "network_analysis": {
+        "total_mb": 0.5262012481689453,
+        "avg_throughput_mbps": 0.005689545329499809,
+        "pattern": "idle"
+      },
+      "process_analysis": {
+        "peak_memory_mb": 8.54296875,
+        "avg_cpu_percent": 0.0,
+        "thread_growth": -5
+      }
+    }
+  },
+  "enhanced_analysis": {
+    "overall_success": true,
+    "confidence_score": 0.5,
+    "resource_bottleneck": "balanced",
+    "bottleneck_confidence": 0.5864800000000001,
+    "llm_inference_pattern": "heavy",
+    "tool_usage_intensity": "minimal",
+    "reasoning_quality_category": "good"
+  }
+}

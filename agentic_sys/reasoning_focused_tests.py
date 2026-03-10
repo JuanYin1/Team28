@@ -38,7 +38,7 @@ Do not just give the final answer - show each step clearly.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=30
+        max_time_seconds=90
     ))
     
     # Problem-Solving with Required Analysis
@@ -67,7 +67,7 @@ Follow this structure exactly.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=60
+        max_time_seconds=180
     ))
     
     # Code Analysis with Mandatory Explanation
@@ -111,7 +111,7 @@ Find ALL bugs and explain each one using the format above.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=90
+        max_time_seconds=270
     ))
     
     # System Design with Required Justification
@@ -147,7 +147,7 @@ Use the format above for each component.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=180
+        max_time_seconds=540
     ))
     
     return reasoning_tests
@@ -185,7 +185,7 @@ This should be thorough and detailed.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=300  # Longer timeout for complex task
+        max_time_seconds=900  # Longer timeout for complex task
     ))
     
     # Tool Execution Intensive Test  
@@ -222,7 +222,7 @@ Show the contents of all created files.""",
             reasoning_weight=0.1,
             efficiency_weight=0.0
         ),
-        max_time_seconds=180
+        max_time_seconds=540
     ))
     
     # Memory/Context Intensive Test
@@ -262,7 +262,7 @@ Provide detailed analysis for each requirement.""",
             efficiency_weight=0.0,
             execution_weight=0.0
         ),
-        max_time_seconds=300
+        max_time_seconds=900
     ))
     
     return stress_tests
