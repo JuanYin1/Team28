@@ -1,13 +1,16 @@
 version: 2
 
+visualization:
+  comparison_filename: comparison_dashboard.png
+
 evaluation:
   shared:
     scoring_version: v2
     runs_per_task: 3
     include_runtime_extension_suite: false
     artifact_retention:
-      enabled: false
-      keep_latest_runs: 3
+      enabled: true
+      keep_latest_runs: 1
     # If high-supervision evidence coverage is below this threshold, run is marked provisional.
     minimum_high_supervision_coverage: 0.40
     # true: main leaderboard only uses core suite tasks (keeps cross-agent comparison strict).
@@ -180,6 +183,9 @@ agents:
         - ~/.continue/logs/cn.log
       # Tail window for supplemental trace files.
       trace_log_tail_lines: 1200
+      # Continue verbose logs are large; keep a larger capture window so
+      # streamed tool-call chunks are not truncated out of the tail.
+      trace_log_max_bytes: 2097152
       executable:
       agent_name:
       config_path: continuedev/default-cli-config
@@ -235,6 +241,54 @@ agents:
         Edit: edit_file
       # false: unknown/new runtime tools are kept as observed evidence instead of being dropped.
       enforce_known_tools: false
+
+  mini-swe-agent:
+    aliases: [mini-swe, mswe]
+    scripts:
+      phase1:
+        results_dir: artifacts/mini-swe-agent/phase1
+      phase2:
+        results_dir: artifacts/mini-swe-agent/phase2
+      phase3:
+        results_dir: artifacts/mini-swe-agent/phase3
+      run_single_test:
+        results_dir: artifacts/mini-swe-agent/phase3/single_test
+    adapter:
+      type: mini-swe-agent
+      executable: mini
+      model_name: openai/gpt-5-mini
+      config_specs: []
+      yolo: true
+      exit_immediately: true
+      output_filename: mini_swe_run.traj.json
+      extra_args: []
+    evaluation_capabilities:
+      # mini-swe-agent can be full-comparable only after probe confirms these
+      # trajectory-derived signals are actually present in the local setup.
+      structured_trace: true
+      tool_trace: true
+      step_trace: true
+      timeline_events: true
+      session_stats: false
+      provider_cost: false
+      token_usage: false
+      skills_runtime: false
+      checker_support:
+        file_artifacts: true
+        stdout_capture: true
+        exit_code: true
+        behavior_validation: true
+    evaluation_trace_parser:
+      tool_call_patterns:
+        - "Tool Call: ([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+      step_patterns:
+        - "Step (\\d+)/\\d+"
+      thinking_patterns:
+        - "(?i)^thinking:"
+      assistant_patterns:
+        - "(?i)^assistant:"
+      tool_result_patterns:
+        - "(?i)^result:"
 
   # Example: add a new agent with YAML only (no adapter/registry code changes).
   example-generic:

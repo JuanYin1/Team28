@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_runtime.adapters import ContinueCnAdapter, MiniAgentAdapter
+from agent_runtime.adapters import ContinueCnAdapter, MiniAgentAdapter, MiniSweAgentAdapter
 from agent_runtime.safe_healthcheck import (
     build_safe_healthcheck_command,
     run_safe_healthcheck,
@@ -30,6 +30,13 @@ class SafeHealthcheckTests(unittest.TestCase):
         self.assertNotIn("--task", cmd)
         self.assertNotIn("-p", cmd)
 
+    def test_build_safe_command_for_mini_swe_uses_help_without_model_request(self):
+        adapter = MiniSweAgentAdapter(executable="mini", model_name="openai/gpt-5")
+        cmd = build_safe_healthcheck_command(adapter)
+        self.assertEqual(cmd, ["mini", "--help"])
+        self.assertNotIn("--task", cmd)
+        self.assertNotIn("-m", cmd)
+
     def test_run_safe_healthcheck_returns_success_on_zero_exit(self):
         adapter = ContinueCnAdapter(executable="cn")
 
@@ -43,6 +50,21 @@ class SafeHealthcheckTests(unittest.TestCase):
 
         self.assertTrue(report.success)
         self.assertEqual(report.command, ["cn", "--version"])
+        self.assertEqual(report.return_code, 0)
+
+    def test_run_safe_healthcheck_supports_mini_swe(self):
+        adapter = MiniSweAgentAdapter(executable="mini")
+
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.stdout = "Usage: mini [OPTIONS]"
+        proc.stderr = ""
+
+        with patch("agent_runtime.safe_healthcheck.subprocess.run", return_value=proc):
+            report = run_safe_healthcheck(adapter)
+
+        self.assertTrue(report.success)
+        self.assertEqual(report.command, ["mini", "--help"])
         self.assertEqual(report.return_code, 0)
 
 

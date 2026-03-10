@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Tuple, Type
 
-from .adapters import AgentAdapter, ContinueCnAdapter, MiniAgentAdapter
+from .adapters import AgentAdapter, ContinueCnAdapter, MiniAgentAdapter, MiniSweAgentAdapter
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,13 @@ AGENT_REGISTRY: Dict[str, AgentRegistration] = {
         aliases=("continue", "cn"),
         adapter_cls=ContinueCnAdapter,
         default_adapter_kwargs={"config_path": "continuedev/default-cli-config"},
+    ),
+    "mini-swe-agent": AgentRegistration(
+        key="mini-swe-agent",
+        cli_name="mini-swe-agent",
+        aliases=("mini-swe", "mswe"),
+        adapter_cls=MiniSweAgentAdapter,
+        default_adapter_kwargs={"executable": "mini"},
     ),
 }
 

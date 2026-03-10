@@ -4,7 +4,7 @@ import subprocess
 from dataclasses import dataclass
 from typing import List, Optional
 
-from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter, MiniSweAgentAdapter
 
 
 @dataclass
@@ -30,6 +30,9 @@ def build_safe_healthcheck_command(adapter: AgentAdapter) -> List[str]:
 
     if isinstance(adapter, ContinueCnAdapter):
         return [adapter.executable, "--version"]
+
+    if isinstance(adapter, MiniSweAgentAdapter):
+        return [adapter.executable, "--help"]
 
     if isinstance(adapter, GenericCLIAdapter):
         executable = adapter.executable or (adapter.command[0] if adapter.command else adapter.agent_id)

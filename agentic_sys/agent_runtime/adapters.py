@@ -3,6 +3,7 @@ from __future__ import annotations
 import abc
 import errno
 import glob
+import json
 import os
 import pty
 import select
@@ -263,6 +264,14 @@ def _collect_trace_chunks_with_fallback(
     )
     if filtered:
         return filtered, "tail_fallback"
+
+    # Continue often writes a single shared verbose log where the tail may no
+    # longer contain the temporary workspace path even though it still contains
+    # tool-call chunks from the just-finished run. In the single-log case,
+    # prefer returning the unfiltered tail over dropping trace evidence
+    # entirely.
+    if len(paths) == 1 and len(fallback_chunks) == 1:
+        return fallback_chunks, "tail_fallback_unfiltered"
 
     return [], "none"
 
@@ -785,6 +794,326 @@ class MiniAgentAdapter(AgentAdapter):
             result.metadata["trace_log_chunks"] = trace_chunks
             result.metadata["trace_log_paths"] = [item["path"] for item in trace_chunks]
         result.metadata["trace_log_capture_mode"] = trace_capture_mode
+        return result
+
+
+class MiniSweAgentAdapter(AgentAdapter):
+    """Adapter for mini-swe-agent CLI (`mini -t ...`)."""
+
+    def __init__(
+        self,
+        executable: str = "mini",
+        *,
+        model_name: Optional[str] = None,
+        config_specs: Optional[List[str]] = None,
+        yolo: bool = True,
+        exit_immediately: bool = True,
+        output_filename: str = "mini_swe_run.traj.json",
+        extra_args: Optional[List[str]] = None,
+    ) -> None:
+        self.executable = executable
+        self.model_name = model_name
+        self.config_specs = list(config_specs or [])
+        self.yolo = bool(yolo)
+        self.exit_immediately = bool(exit_immediately)
+        self.output_filename = output_filename
+        self.extra_args = list(extra_args or [])
+
+    @property
+    def agent_id(self) -> str:
+        return "mini-swe-agent"
+
+    @property
+    def process_name_hint(self) -> str:
+        return "mini"
+
+    @classmethod
+    def auto_detect(
+        cls,
+        *,
+        model_name: Optional[str] = None,
+        config_specs: Optional[List[str]] = None,
+        yolo: bool = True,
+        exit_immediately: bool = True,
+        output_filename: str = "mini_swe_run.traj.json",
+        extra_args: Optional[List[str]] = None,
+    ) -> "MiniSweAgentAdapter":
+        found = shutil.which("mini")
+        if not found:
+            raise RuntimeError(
+                "Could not find mini-swe-agent executable (`mini`). "
+                "Install with: pip install mini-swe-agent"
+            )
+        return cls(
+            executable=found,
+            model_name=model_name,
+            config_specs=config_specs,
+            yolo=yolo,
+            exit_immediately=exit_immediately,
+            output_filename=output_filename,
+            extra_args=extra_args,
+        )
+
+    def _trajectory_path(self, request: AgentExecutionRequest) -> Path:
+        return Path(request.workspace) / self.output_filename
+
+    def build_command(self, request: AgentExecutionRequest) -> List[str]:
+        cmd: List[str] = [self.executable, "-t", request.task_prompt]
+        if self.model_name:
+            cmd.extend(["-m", self.model_name])
+        for config_spec in self.config_specs:
+            cmd.extend(["-c", config_spec])
+        if self.yolo:
+            cmd.append("-y")
+        if self.exit_immediately:
+            cmd.append("--exit-immediately")
+        cmd.extend(["-o", str(self._trajectory_path(request))])
+        cmd.extend(self.extra_args)
+        return cmd
+
+    @staticmethod
+    def _message_text(message: Dict[str, object]) -> str:
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        texts.append(text)
+            return "\n".join(texts)
+        output = message.get("output")
+        if isinstance(output, str):
+            return output
+        return ""
+
+    @staticmethod
+    def _infer_tool_name_from_action(action: Dict[str, object]) -> str:
+        explicit_tool = action.get("tool") or action.get("name")
+        if isinstance(explicit_tool, str) and explicit_tool and explicit_tool != "bash":
+            return explicit_tool
+
+        command = str(action.get("command") or "").strip().lower()
+        if not command:
+            return "bash"
+
+        write_markers = (
+            ">",
+            ">>",
+            "tee ",
+            "cat <<",
+            "printf ",
+            "echo ",
+            "touch ",
+            "cp ",
+            "mv ",
+        )
+        edit_markers = (
+            "sed -i",
+            "perl -0pi",
+            "perl -pi",
+            "python -c",
+            "python3 -c",
+            "apply_patch",
+            "ed ",
+            "ex ",
+        )
+        read_prefixes = (
+            "cat ",
+            "ls",
+            "find ",
+            "rg ",
+            "grep ",
+            "wc ",
+            "hexdump ",
+            "head ",
+            "tail ",
+            "nl ",
+        )
+
+        if any(marker in command for marker in edit_markers):
+            return "edit_file"
+
+        if any(command.startswith(prefix) for prefix in read_prefixes):
+            return "read_file"
+
+        if (
+            any(marker in command for marker in write_markers)
+            and not command.startswith(("python ", "python3 ", "bash ", "sh ", "./"))
+        ):
+            return "write_file"
+
+        return "bash"
+
+    @staticmethod
+    def _group_messages_into_steps(messages: List[Dict[str, object]]) -> List[List[Dict[str, object]]]:
+        steps: List[List[Dict[str, object]]] = []
+        current_step: List[Dict[str, object]] = []
+        for message in messages:
+            extra = message.get("extra")
+            actions = extra.get("actions") if isinstance(extra, dict) else None
+            role = str(message.get("role") or "")
+            if actions or role == "assistant":
+                if current_step:
+                    steps.append(current_step)
+                current_step = [message]
+            else:
+                current_step.append(message)
+        if current_step:
+            steps.append(current_step)
+        return steps
+
+    @classmethod
+    def _trajectory_to_synthetic_log(cls, trajectory_data: Dict[str, object]) -> str:
+        messages_raw = trajectory_data.get("messages")
+        messages = messages_raw if isinstance(messages_raw, list) else []
+        typed_messages = [message for message in messages if isinstance(message, dict)]
+        steps = cls._group_messages_into_steps(typed_messages)
+        total_steps = max(len(steps), 1)
+
+        log_lines: List[str] = []
+        for idx, step_messages in enumerate(steps, start=1):
+            log_lines.append(f"Step {idx}/{total_steps}")
+            for message in step_messages:
+                role = str(message.get("role") or "").lower()
+                text = cls._message_text(message).strip()
+                if role == "assistant":
+                    if text:
+                        log_lines.append("thinking: planning next action")
+                        log_lines.append(f"assistant: {text}")
+                    extra = message.get("extra")
+                    actions = extra.get("actions") if isinstance(extra, dict) else None
+                    if isinstance(actions, list):
+                        for action in actions:
+                            if not isinstance(action, dict):
+                                continue
+                            tool_name = cls._infer_tool_name_from_action(action)
+                            log_lines.append(f"Tool Call: {tool_name}")
+                            result_text = cls._message_text(action).strip()
+                            if result_text:
+                                log_lines.append(f"Result: {result_text}")
+                elif role in {"user", "system"}:
+                    continue
+                elif text:
+                    log_lines.append(text)
+
+        return "\n".join(log_lines).strip()
+
+    @classmethod
+    def _trajectory_to_structured_timeline(
+        cls,
+        trajectory_data: Dict[str, object],
+    ) -> List[Dict[str, object]]:
+        messages_raw = trajectory_data.get("messages")
+        messages = messages_raw if isinstance(messages_raw, list) else []
+        typed_messages = [message for message in messages if isinstance(message, dict)]
+        steps = cls._group_messages_into_steps(typed_messages)
+        timeline: List[Dict[str, object]] = []
+        for step_idx, step_messages in enumerate(steps, start=1):
+            for message in step_messages:
+                role = str(message.get("role") or "").lower()
+                text = cls._message_text(message).strip()
+                if role == "assistant":
+                    if text:
+                        timeline.append(
+                            {
+                                "event_type": "thinking",
+                                "step": step_idx,
+                                "content": "planning next action",
+                            }
+                        )
+                        timeline.append(
+                            {
+                                "event_type": "assistant_response",
+                                "step": step_idx,
+                                "content": text,
+                            }
+                        )
+                    extra = message.get("extra")
+                    actions = extra.get("actions") if isinstance(extra, dict) else None
+                    if isinstance(actions, list):
+                        for action in actions:
+                            if not isinstance(action, dict):
+                                continue
+                            tool_name = cls._infer_tool_name_from_action(action)
+                            timeline.append(
+                                {
+                                    "event_type": "tool_call",
+                                    "step": step_idx,
+                                    "tool_name": tool_name,
+                                }
+                            )
+                            result_text = cls._message_text(action).strip()
+                            if result_text:
+                                timeline.append(
+                                    {
+                                        "event_type": "tool_result",
+                                        "step": step_idx,
+                                        "tool_name": tool_name,
+                                        "content": result_text,
+                                    }
+                                )
+                elif role not in {"user", "system"} and text:
+                    timeline.append({"event_type": "message", "step": step_idx, "content": text})
+        return timeline
+
+    @classmethod
+    def _load_trajectory_artifacts(
+        cls,
+        trajectory_path: Path,
+    ) -> Tuple[str, List[Dict[str, object]]]:
+        if not trajectory_path.exists():
+            return "", []
+        try:
+            data = json.loads(trajectory_path.read_text(encoding="utf-8"))
+        except Exception:
+            return "", []
+
+        payload: Dict[str, object]
+        if isinstance(data, list):
+            payload = {"messages": data}
+        elif isinstance(data, dict):
+            payload = data
+        else:
+            return "", []
+
+        return (
+            cls._trajectory_to_synthetic_log(payload),
+            cls._trajectory_to_structured_timeline(payload),
+        )
+
+    def run(
+        self,
+        request: AgentExecutionRequest,
+        on_process_start: Optional[Callable[[int], None]] = None,
+    ) -> AgentExecutionResult:
+        result = _run_command_pipe(
+            cmd=self.build_command(request),
+            cwd=request.workspace,
+            env=None,
+            timeout_seconds=request.timeout_seconds,
+            success_codes=[0],
+            on_process_start=on_process_start,
+        )
+        synthetic_log, structured_timeline = self._load_trajectory_artifacts(
+            self._trajectory_path(request)
+        )
+        if synthetic_log:
+            merged_stdout = "\n".join(part for part in [synthetic_log, result.stdout] if part).strip()
+            result.stdout = f"{merged_stdout}\n" if merged_stdout else ""
+            result.metadata["stream_trace_mode"] = "mini_swe_trajectory"
+        if structured_timeline:
+            result.metadata["structured_timeline"] = structured_timeline
+        if result.success and not synthetic_log:
+            result.stderr = (
+                f"{result.stderr}\n" if result.stderr else ""
+            ) + (
+                "mini-swe-agent finished without a trajectory file. "
+                "Check model configuration and mini-swe-agent setup."
+            )
+            result.success = False
         return result
 
 

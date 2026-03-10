@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agent_runtime.adapters import ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from agent_runtime.adapters import ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter, MiniSweAgentAdapter
 from agent_runtime.models import AgentExecutionRequest, AgentExecutionResult
 
 
@@ -408,6 +408,43 @@ class ContinueCnAdapterTests(unittest.TestCase):
         self.assertIn("/private/tmp/tmp/b.txt", result.metadata["trace_log_chunks"][0]["text"])
         self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback")
 
+    def test_run_uses_unfiltered_fallback_tail_for_single_trace_log(self):
+        adapter = ContinueCnAdapter(
+            executable="cn",
+            trace_log_paths=["~/.continue/logs/cn.log"],
+        )
+        request = AgentExecutionRequest(
+            task_prompt="task",
+            workspace="/tmp/ws_missing_token",
+            timeout_seconds=30,
+        )
+        fake_result = AgentExecutionResult(
+            command=["cn", "-p", "task"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.6,
+            return_code=0,
+            pid=778,
+            metadata={"transport": "pipe"},
+        )
+        fallback_chunks = [
+            {
+                "path": "/Users/x/.continue/logs/cn.log",
+                "text": 'Received chunk {"function":{"name":"Write"}}',
+            }
+        ]
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch("agent_runtime.adapters._snapshot_log_offsets", return_value={}), \
+             patch("agent_runtime.adapters._capture_trace_log_chunks", return_value=[]), \
+             patch("agent_runtime.adapters._capture_trace_log_tail", return_value=fallback_chunks):
+            result = adapter.run(request)
+
+        self.assertIn("trace_log_chunks", result.metadata)
+        self.assertEqual(result.metadata["trace_log_chunks"], fallback_chunks)
+        self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback_unfiltered")
+
 
 class GenericCLIAdapterTests(unittest.TestCase):
     def test_invalid_transport_raises_value_error(self):
@@ -579,6 +616,138 @@ class GenericCLIAdapterTests(unittest.TestCase):
         self.assertEqual(len(result.metadata["trace_log_chunks"]), 1)
         self.assertIn("ws_abc", result.metadata["trace_log_chunks"][0]["text"])
         self.assertEqual(result.metadata["trace_log_capture_mode"], "tail_fallback")
+
+
+class MiniSweAgentAdapterTests(unittest.TestCase):
+    def test_build_command(self):
+        adapter = MiniSweAgentAdapter(
+            executable="mini",
+            model_name="openai/gpt-5",
+            config_specs=["mini.yaml"],
+        )
+        request = AgentExecutionRequest(task_prompt="solve task", workspace="/tmp/ws", timeout_seconds=30)
+
+        self.assertEqual(
+            adapter.build_command(request),
+            [
+                "mini",
+                "-t",
+                "solve task",
+                "-m",
+                "openai/gpt-5",
+                "-c",
+                "mini.yaml",
+                "-y",
+                "--exit-immediately",
+                "-o",
+                "/tmp/ws/mini_swe_run.traj.json",
+            ],
+        )
+
+    def test_auto_detect_uses_path_lookup(self):
+        with patch("agent_runtime.adapters.shutil.which", return_value="/usr/local/bin/mini"):
+            adapter = MiniSweAgentAdapter.auto_detect(model_name="openai/gpt-5")
+
+        self.assertEqual(adapter.executable, "/usr/local/bin/mini")
+        self.assertEqual(adapter.model_name, "openai/gpt-5")
+
+    def test_auto_detect_raises_when_unavailable(self):
+        with patch("agent_runtime.adapters.shutil.which", return_value=None):
+            with self.assertRaises(RuntimeError):
+                MiniSweAgentAdapter.auto_detect()
+
+    def test_run_merges_trajectory_trace_into_metadata(self):
+        adapter = MiniSweAgentAdapter(executable="mini")
+        request = AgentExecutionRequest(task_prompt="task", workspace="/tmp/ws", timeout_seconds=30)
+        fake_result = AgentExecutionResult(
+            command=["mini", "-t", "task"],
+            stdout="raw stdout",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.5,
+            return_code=0,
+            pid=123,
+            metadata={},
+        )
+
+        with patch("agent_runtime.adapters._run_command_pipe", return_value=fake_result), \
+             patch.object(
+                 MiniSweAgentAdapter,
+                 "_load_trajectory_artifacts",
+                 return_value=("Step 1/1\nTool Call: bash", [{"event_type": "tool_call", "tool_name": "bash"}]),
+             ):
+            result = adapter.run(request)
+
+        self.assertTrue(result.success)
+        self.assertIn("Step 1/1", result.stdout)
+        self.assertEqual(result.metadata["stream_trace_mode"], "mini_swe_trajectory")
+        self.assertEqual(result.metadata["structured_timeline"][0]["tool_name"], "bash")
+
+    def test_trajectory_to_structured_timeline_matches_visualization_event_model(self):
+        trajectory = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "I will inspect the workspace.",
+                    "extra": {
+                        "actions": [
+                            {
+                                "tool": "bash",
+                                "output": "listing complete",
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+
+        timeline = MiniSweAgentAdapter._trajectory_to_structured_timeline(trajectory)
+
+        self.assertEqual(
+            [event["event_type"] for event in timeline],
+            ["thinking", "assistant_response", "tool_call", "tool_result"],
+        )
+        self.assertEqual([event["step"] for event in timeline], [1, 1, 1, 1])
+        self.assertEqual(timeline[2]["tool_name"], "bash")
+        self.assertEqual(timeline[3]["content"], "listing complete")
+
+    def test_infer_tool_name_from_action_best_effort_maps_file_operations(self):
+        self.assertEqual(
+            MiniSweAgentAdapter._infer_tool_name_from_action({"command": "cat hello.txt"}),
+            "read_file",
+        )
+        self.assertEqual(
+            MiniSweAgentAdapter._infer_tool_name_from_action({"command": "printf hi > hello.txt"}),
+            "write_file",
+        )
+        self.assertEqual(
+            MiniSweAgentAdapter._infer_tool_name_from_action({"command": "sed -i '' '1s/a/b/' hello.txt"}),
+            "edit_file",
+        )
+        self.assertEqual(
+            MiniSweAgentAdapter._infer_tool_name_from_action({"command": "python script.py"}),
+            "bash",
+        )
+
+    def test_trajectory_to_structured_timeline_maps_bash_commands_to_normalized_tools(self):
+        trajectory = {
+            "messages": [
+                {
+                    "role": "assistant",
+                    "content": "I will create and inspect files.",
+                    "extra": {
+                        "actions": [
+                            {"command": "printf hi > hello.txt", "output": "written"},
+                            {"command": "cat hello.txt", "output": "hi"},
+                        ]
+                    },
+                }
+            ]
+        }
+
+        timeline = MiniSweAgentAdapter._trajectory_to_structured_timeline(trajectory)
+        tool_calls = [event for event in timeline if event["event_type"] == "tool_call"]
+        self.assertEqual([event["tool_name"] for event in tool_calls], ["write_file", "read_file"])
 
 
 if __name__ == "__main__":

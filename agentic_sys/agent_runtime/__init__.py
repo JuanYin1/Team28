@@ -1,4 +1,4 @@
-from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter, MiniSweAgentAdapter
 from .continue_healthcheck import (
     ContinueHealthcheckReport,
     ContinueLoginReport,
@@ -32,6 +32,7 @@ from .capability_probe import (
 __all__ = [
     "AgentAdapter",
     "MiniAgentAdapter",
+    "MiniSweAgentAdapter",
     "ContinueCnAdapter",
     "GenericCLIAdapter",
     "ContinueHealthcheckReport",

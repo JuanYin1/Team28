@@ -3,7 +3,13 @@ from __future__ import annotations
 import inspect
 from typing import Any, Dict
 
-from .adapters import AgentAdapter, ContinueCnAdapter, GenericCLIAdapter, MiniAgentAdapter
+from .adapters import (
+    AgentAdapter,
+    ContinueCnAdapter,
+    GenericCLIAdapter,
+    MiniAgentAdapter,
+    MiniSweAgentAdapter,
+)
 from .registry import get_registration, supported_agent_cli_choices
 
 
@@ -17,6 +23,10 @@ _LEGACY_KWARG_ALIASES = {
     "continue_model_slugs": "model_slugs",
     "continue_allow_policies": "allow_policies",
     "continue_extra_args": "extra_args",
+    "mini_swe_executable": "executable",
+    "mini_swe_model_name": "model_name",
+    "mini_swe_config_specs": "config_specs",
+    "mini_swe_extra_args": "extra_args",
 }
 
 _ADAPTER_TYPE_MAP = {
@@ -25,6 +35,9 @@ _ADAPTER_TYPE_MAP = {
     "continue-cn": ContinueCnAdapter,
     "continue": ContinueCnAdapter,
     "cn": ContinueCnAdapter,
+    "mini-swe-agent": MiniSweAgentAdapter,
+    "mini-swe": MiniSweAgentAdapter,
+    "mini-swe-agent-cli": MiniSweAgentAdapter,
     "generic-cli": GenericCLIAdapter,
     "generic": GenericCLIAdapter,
 }

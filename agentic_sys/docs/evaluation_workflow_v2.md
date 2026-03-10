@@ -37,6 +37,9 @@ Resolution rules:
 - With probe profile: `resolved = declared AND probed` (conservative).
 - If profile has only legacy `resolved_capabilities`, use it as fallback.
 - If profile exists but all `probe_results.success=false`, profile is treated as unusable and evaluator falls back to declared YAML capabilities.
+- Runtimes with model-dependent trace formats should declare only the signals
+  they are expected to support, then rely on probe to confirm those signals in
+  the local setup before they become fully comparable.
 
 ## 4) Probe Lifecycle (Phase3)
 
@@ -50,6 +53,8 @@ Flag behavior:
 - `--refresh-capability-profile`: probe, then evaluate.
 - `--probe-agent`: probe, then evaluate (same behavior as refresh).
 - `--probe-only`: probe and exit.
+- For `mini-swe-agent`, use refresh before cross-agent comparison so
+  trajectory-derived trace support is measured instead of assumed.
 
 Profile path:
 - `config/artifacts/capability_profiles/<agent>.json`

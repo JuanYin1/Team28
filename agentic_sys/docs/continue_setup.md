@@ -28,6 +28,14 @@ source ~/.zshrc
 
 ## 3) Quick Health Check
 
+Non-billing CLI check:
+
+```bash
+python verify_agent_setup.py --agent continue
+```
+
+Optional live request check:
+
 ```bash
 cn -p "Reply with exactly OK and nothing else." --auto
 python verify_continue_setup.py
