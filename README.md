@@ -16,6 +16,10 @@ Agent runtime profiles are in:
 cd agentic_sys
 ```
 
+Unless noted otherwise, shell commands below assume you are inside `agentic_sys/`.
+File references keep repo-root paths such as `agentic_sys/docs/...` so they stay
+unambiguous when discussed from the top-level README.
+
 ## 2) Continue setup (team API key mode)
 
 If you use Continue with team credits, follow:
@@ -36,7 +40,7 @@ For install, PATH notes, non-billing healthcheck, and recommended phase3 run:
 
 For the full end-to-end V2 scoring workflow (config fields, core suite policy,
 comparability/provisional rules, multi-run aggregation, outputs):
-- `docs/evaluation_workflow_v2.md`
+- `agentic_sys/docs/evaluation_workflow_v2.md`
 
 ## 2c) Mini-SWE-Agent setup
 
@@ -149,9 +153,9 @@ Each input JSON produces a sibling PNG, and multi-file runs also generate
 ## 6) Add a new agent (YAML-only)
 
 Follow:
-- `docs/new_agent_onboarding.md`
+- `agentic_sys/docs/new_agent_onboarding.md`
 
-You only need to add a profile in `config/config.yaml`, then run with:
+You only need to add a profile in `agentic_sys/config/config.yaml`, then run with:
 
 ```bash
 python run_single_test.py --agent <new-agent-name-or-alias>
@@ -161,10 +165,17 @@ python run_single_test.py --agent <new-agent-name-or-alias>
 
 - Use `--agent` explicitly in all scripts.
 - Do not commit API keys/secrets.
-- Continue defaults (workspace/model) are controlled in `config/config.yaml`.
-- Non-billing adapter health checks are available in `agent_runtime/safe_healthcheck.py`.
+- Continue defaults (workspace/model) are controlled in `agentic_sys/config/config.yaml`.
+- Non-billing adapter health checks are available in `agentic_sys/agent_runtime/safe_healthcheck.py`.
 
-## 8) Unit Tests (Required)
+## 8) Read Reports Carefully
+
+- CLEAR reports separate actionable issues from reporting caveats.
+- Estimated cost is advisory only unless the runtime exposes provider-reported cost.
+- Production-readiness status is a summary for the evaluated suite, not a blanket deployment guarantee.
+- Repeated-run time breakdowns may use an observed subset when one phase is only visible in part of the run set.
+
+## 9) Unit Tests (Required)
 
 Before you submit changes, ensure unit tests pass at minimum.
 

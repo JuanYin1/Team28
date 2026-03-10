@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -801,6 +802,7 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
             report_text = reports[0].read_text()
 
         self.assertIn("### ⚠️ Areas for Improvement:\n- (none)", report_text)
+        self.assertIn("### 📝 Reporting Caveats:\n- (none)", report_text)
 
     async def test_generated_report_surfaces_improvements_when_tasks_fail(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -845,6 +847,145 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("### ⚠️ Areas for Improvement:\n- (none)", report_text)
         self.assertIn("Improve pass rate", report_text)
         self.assertIn("Oracle/checker failures", report_text)
+
+    async def test_generated_report_separates_reporting_caveats_from_actionable_issues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+            result = AgentEvaluationResult(
+                test_case=AgentTestCase(
+                    name="case",
+                    category="analysis",
+                    description="d",
+                    task_prompt="prompt",
+                    evaluation_criteria=AgentTestCriteria(),
+                ),
+                clear_metrics=AgentCLEARMetrics(
+                    estimated_cost_usd=0.01,
+                    total_task_time=20.0,
+                    steps_to_completion=5,
+                    task_completion_accuracy=0.95,
+                    tool_selection_accuracy=1.0,
+                    reasoning_coherence=0.9,
+                    error_recovery_effectiveness=1.0,
+                    execution_success_rate=1.0,
+                    cost_is_estimated=True,
+                ),
+                evaluation_result=EvaluationResult(overall_score=0.95, passed=True, confidence=0.9),
+                agent_output="ok",
+                overall_clear_score=0.95,
+                overall_v2_score=0.95,
+                overall_v2_diagnostic_score=0.90,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                comparability={
+                    "status": "COMPARABLE",
+                    "core_status": "COMPARABLE",
+                    "full_status": "COMPARABLE",
+                    "eligible_for_main_leaderboard": True,
+                    "eligible_for_full_leaderboard": True,
+                },
+                evidence_quality={
+                    "checker_executed": True,
+                    "checker_passed": True,
+                },
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+                recommendations=[
+                    "💲 Cost is estimated (not provider-reported) and excluded from strict scoring",
+                    "📉 Unknown dimensions: cost_efficiency, token_efficiency",
+                ],
+                time_breakdown={
+                    "llm_inference_s": 10.0,
+                    "tool_execution_s": 6.0,
+                    "coordination_s": 4.0,
+                    "llm_inference_pct": 50.0,
+                    "tool_execution_pct": 30.0,
+                    "coordination_pct": 20.0,
+                    "method": "timeline_weighted",
+                    "total_time_basis_s": 20.0,
+                },
+                step_resource_profiles=[],
+            )
+
+            await evaluator._generate_report([result])
+            reports = list(Path(tmp).glob("mini_agent_clear_report_*.md"))
+            self.assertEqual(len(reports), 1)
+            report_text = reports[0].read_text()
+
+        self.assertIn("### 🔥 Most Critical Issues:\n- (none)", report_text)
+        self.assertIn("### ⚠️ Areas for Improvement:\n- (none)", report_text)
+        self.assertIn("Cost is estimated", report_text)
+        self.assertIn("### Ready for Deployment: ⚠️ READY WITH CAVEATS", report_text)
+        self.assertNotIn("Cost-effective operation", report_text)
+
+    async def test_generated_report_does_not_claim_checker_success_without_checker_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+            result = AgentEvaluationResult(
+                test_case=AgentTestCase(
+                    name="case",
+                    category="analysis",
+                    description="d",
+                    task_prompt="prompt",
+                    evaluation_criteria=AgentTestCriteria(),
+                ),
+                clear_metrics=AgentCLEARMetrics(
+                    estimated_cost_usd=0.01,
+                    total_task_time=12.0,
+                    steps_to_completion=4,
+                    task_completion_accuracy=0.9,
+                    tool_selection_accuracy=0.9,
+                    reasoning_coherence=0.85,
+                    error_recovery_effectiveness=0.8,
+                    execution_success_rate=1.0,
+                    cost_is_estimated=True,
+                ),
+                evaluation_result=EvaluationResult(overall_score=0.9, passed=True, confidence=0.9),
+                overall_clear_score=0.9,
+                overall_v2_score=0.9,
+                overall_v2_diagnostic_score=0.85,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                comparability={
+                    "status": "COMPARABLE",
+                    "core_status": "COMPARABLE",
+                    "full_status": "COMPARABLE",
+                    "eligible_for_main_leaderboard": True,
+                    "eligible_for_full_leaderboard": True,
+                },
+                evidence_quality={
+                    "checker_executed": False,
+                    "checker_passed": False,
+                },
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+                recommendations=[],
+                time_breakdown={
+                    "llm_inference_s": 6.0,
+                    "tool_execution_s": 3.0,
+                    "coordination_s": 3.0,
+                    "llm_inference_pct": 50.0,
+                    "tool_execution_pct": 25.0,
+                    "coordination_pct": 25.0,
+                    "method": "timeline_weighted",
+                    "total_time_basis_s": 12.0,
+                },
+                step_resource_profiles=[],
+            )
+
+            await evaluator._generate_report([result])
+            reports = list(Path(tmp).glob("mini_agent_clear_report_*.md"))
+            self.assertEqual(len(reports), 1)
+            report_text = reports[0].read_text()
+
+        self.assertIn("No checker-backed evidence was captured in this run set", report_text)
+        self.assertNotIn("Checker-backed outcome validation passed on all evaluated tasks", report_text)
 
     def test_runtime_autodetect_failure_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1006,6 +1147,99 @@ class AgentTimeBreakdownTests(unittest.TestCase):
         self.assertIsNone(breakdown["llm_inference_s"])
         self.assertIsNone(breakdown["llm_inference_pct"])
         self.assertEqual(breakdown["method"], "timeline_weighted_no_llm_events")
+
+    def test_repeated_run_aggregation_uses_consistent_subset_for_partial_llm_observation(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 3},
+            )
+
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+            )
+
+            def _result(total: float, llm: Optional[float], tool: float, coord: float) -> AgentEvaluationResult:
+                llm_pct, tool_pct, coord_pct = evaluator._time_breakdown_percentages(
+                    total_time_s=total,
+                    llm_s=llm,
+                    tool_s=tool,
+                    coord_s=coord,
+                )
+                return AgentEvaluationResult(
+                    test_case=test_case,
+                    clear_metrics=AgentCLEARMetrics(
+                        total_task_time=total,
+                        execution_success_rate=1.0,
+                    ),
+                    evaluation_result=EvaluationResult(overall_score=0.9, confidence=0.9, passed=True),
+                    overall_clear_score=0.9,
+                    overall_v2_score=0.9,
+                    passed_all_thresholds=True,
+                    confidence_score=0.9,
+                    v2_dimension_details={
+                        "outcome": {"score": 0.9, "supported": True, "observed": True},
+                        "safety": {"score": 0.9, "supported": True, "observed": True},
+                        "robustness": {"score": 0.9, "supported": True, "observed": True},
+                        "basic_efficiency": {"score": 0.9, "supported": True, "observed": True},
+                    },
+                    evidence_quality={"checker_executed": True, "checker_passed": True, "high_supervision_coverage": 1.0},
+                    comparability={
+                        "status": "COMPARABLE",
+                        "core_status": "COMPARABLE",
+                        "full_status": "COMPARABLE",
+                        "eligible_for_main_leaderboard": True,
+                        "eligible_for_full_leaderboard": True,
+                        "required_signal_status": {
+                            "checker_executed": True,
+                            "repeated_runs": True,
+                            "wall_clock_time": True,
+                        },
+                    },
+                    gate_status={
+                        "safety_gate": {"status": "pass"},
+                        "critical_function_gate": {"status": "pass"},
+                        "oracle_gate": {"status": "pass"},
+                    },
+                    time_breakdown={
+                        "llm_inference_s": llm,
+                        "tool_execution_s": tool,
+                        "coordination_s": coord,
+                        "llm_inference_pct": llm_pct,
+                        "tool_execution_pct": tool_pct,
+                        "coordination_pct": coord_pct,
+                        "method": "timeline_weighted" if llm is not None else "timeline_weighted_no_llm_events",
+                        "total_time_basis_s": total,
+                    },
+                )
+
+            aggregated = evaluator._aggregate_repeated_results(
+                test_case,
+                [
+                    _result(total=18.0, llm=9.0, tool=6.0, coord=3.0),
+                    _result(total=14.0, llm=None, tool=8.0, coord=6.0),
+                    _result(total=12.0, llm=6.0, tool=4.0, coord=2.0),
+                ],
+            )
+
+        self.assertEqual(aggregated.time_breakdown["phase_observation_status"], "partial_llm_observation")
+        self.assertEqual(aggregated.time_breakdown["breakdown_run_count"], 2)
+        self.assertEqual(aggregated.time_breakdown["aggregated_over_runs"], 3)
+        self.assertAlmostEqual(aggregated.time_breakdown["total_time_basis_s"], 15.0)
+        self.assertAlmostEqual(aggregated.time_breakdown["llm_inference_s"], 7.5)
+        self.assertAlmostEqual(aggregated.time_breakdown["tool_execution_s"], 5.0)
+        self.assertAlmostEqual(aggregated.time_breakdown["coordination_s"], 2.5)
+        total_pct = (
+            (aggregated.time_breakdown["llm_inference_pct"] or 0.0)
+            + aggregated.time_breakdown["tool_execution_pct"]
+            + aggregated.time_breakdown["coordination_pct"]
+        )
+        self.assertAlmostEqual(total_pct, 100.0, places=1)
 
 
 class AgentV2ScoringTests(unittest.TestCase):

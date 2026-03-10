@@ -81,9 +81,29 @@ Profile path:
 
 - `llm_inference_s` may be `null` when no LLM event signal is observed.
 - `null` means unknown/unobserved, not zero inference time.
+- For repeated runs, phase means should be computed from a consistent run subset.
+  If one phase is only observed in some runs, do not mix that phase with all-run
+  averages from other phases.
+- `time_breakdown.total_time_basis_s` is the wall-clock mean used for displayed
+  phase percentages.
+- `time_breakdown.breakdown_run_count` can be smaller than `repeat_stats.run_count`
+  when a phase was only observed in part of the repeated-run set.
 - Cross-runtime latency comparisons should use wall-clock task time first.
 
-## 8) Required Result Fields
+## 8) Report Semantics
+
+- `Most Critical Issues` should contain actionable problems only.
+- Estimated-cost warnings, unsupported dimensions, and similar observability notes
+  belong in a separate caveat section, not in the actionable issue summary.
+- Production-readiness status is advisory for the evaluated suite only; it must
+  not be treated as a blanket deployment certification.
+- A report can be fully comparable for supported outcome/process/trace dimensions
+  while still carrying caveats for unsupported `cost_efficiency` or
+  `token_efficiency`.
+- If parser noise degrades event labeling, treat checker-backed outcomes and task
+  JSON fields as the source of truth; process-level narrative may need manual review.
+
+## 9) Required Result Fields
 
 Each task JSON must include:
 - `overall_v2_score`
@@ -99,7 +119,7 @@ Each task JSON must include:
 - `repeat_stats`
 - `time_breakdown`
 
-## 9) Minimum Regression Gate
+## 10) Minimum Regression Gate
 
 Before merge:
 

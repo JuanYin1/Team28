@@ -1,5 +1,0 @@
-test_case,main_v2_score,main_v2_run_mean,core_status,eligible_for_main_leaderboard,is_provisional
-simple_file_operations,0.960000,0.826667,COMPARABLE,True,False
-python_coding_task,0.960000,0.826667,COMPARABLE,True,False
-data_analysis_task,0.960000,0.826667,COMPARABLE,True,False
-error_handling_test,0.968303,0.836667,COMPARABLE,True,False

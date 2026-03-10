@@ -48,7 +48,7 @@ Outputs are written under `artifacts/<agent>/phase3/`:
 
 ## Fair Comparison (Recommended)
 
-Run both agents with refreshed capability profiles before side-by-side comparison:
+Run all configured agents with refreshed capability profiles before side-by-side comparison:
 
 ```bash
 python clear_evaluation_system.py --agent mini-agent --refresh-capability-profile
@@ -106,6 +106,19 @@ Mode semantics:
 - `--refresh-capability-profile`: probe first, then run full evaluation.
 - `--probe-agent`: same behavior as `--refresh-capability-profile`.
 - `--probe-only`: probe only, no evaluation tasks.
+
+## Interpreting CLEAR Reports
+
+- `Most Critical Issues` lists actionable problems found in the evaluated suite.
+- `Reporting Caveats` lists limitations in evidence quality or unsupported dimensions, such as estimated cost.
+- `Ready for Deployment` is advisory for the evaluated tasks only. It is not a substitute for staging, security review, or production load validation.
+- Time-breakdown tables may use a consistent observed subset of repeated runs when a phase is only visible in part of the run set.
+
+## Known Limitations
+
+- Latest phase3 artifacts are suitable for comparing checker-backed outcomes and supported trace/process dimensions.
+- `cost_efficiency` and `token_efficiency` remain advisory until the runtime exposes provider cost and token/session statistics in the evaluated run, not just in a capability profile.
+- Noisy parser classifications can still weaken process-level interpretation even when a task remains formally `COMPARABLE`.
 
 ## Run Unit Tests (Required)
 

@@ -2893,6 +2893,57 @@ Please show me the complete process including testing.""",
                 deduped.append(recommendation)
         return deduped
 
+    @staticmethod
+    def _time_breakdown_percentages(
+        *,
+        total_time_s: float,
+        llm_s: Optional[float],
+        tool_s: float,
+        coord_s: float,
+    ) -> Tuple[Optional[float], float, float]:
+        total = max(0.0, float(total_time_s or 0.0))
+        tool = max(0.0, float(tool_s or 0.0))
+        coord = max(0.0, float(coord_s or 0.0))
+        llm = None if llm_s is None else max(0.0, float(llm_s or 0.0))
+        if total <= 0.0:
+            return (None if llm is None else 0.0, 0.0, 0.0)
+
+        # When phase totals are internally consistent, force the final bucket to absorb
+        # rounding so displayed percentages remain self-consistent.
+        if llm is None:
+            tool_pct = round(100.0 * tool / total, 1)
+            coord_pct = round(100.0 * coord / total, 1)
+            if abs((tool + coord) - total) <= 0.05:
+                coord_pct = round(max(0.0, 100.0 - tool_pct), 1)
+            return None, tool_pct, coord_pct
+
+        llm_pct = round(100.0 * llm / total, 1)
+        tool_pct = round(100.0 * tool / total, 1)
+        coord_pct = round(100.0 * coord / total, 1)
+        if abs((llm + tool + coord) - total) <= 0.05:
+            coord_pct = round(max(0.0, 100.0 - llm_pct - tool_pct), 1)
+        return llm_pct, tool_pct, coord_pct
+
+    @staticmethod
+    def _recommendation_kind(recommendation: str) -> str:
+        text = str(recommendation or "").strip()
+        if not text:
+            return "unknown"
+        if text.startswith("✨"):
+            return "positive"
+        if text.startswith(("💲", "📉", "🧾")):
+            return "informational"
+        return "actionable"
+
+    @staticmethod
+    def _recommendation_counts(recommendations: List[str]) -> List[Tuple[str, int]]:
+        counts: Dict[str, int] = {}
+        for recommendation in recommendations:
+            if not recommendation:
+                continue
+            counts[recommendation] = counts.get(recommendation, 0) + 1
+        return sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+
     def _calculate_time_breakdown(self, log_analysis: Dict[str, Any], execution_time: float) -> Dict[str, Any]:
         """
         Compute LLM inference / tool execution / coordination time split.
@@ -2924,7 +2975,12 @@ Please show me the complete process including testing.""",
                 tool_s = round(execution_time * 0.20, 2)
                 coord_s = round(execution_time * 0.10, 2)
                 method = "fixed_estimate (no timeline)"
-                llm_pct, tool_pct, coord_pct = 70.0, 20.0, 10.0
+                llm_pct, tool_pct, coord_pct = self._time_breakdown_percentages(
+                    total_time_s=execution_time,
+                    llm_s=llm_s,
+                    tool_s=tool_s,
+                    coord_s=coord_s,
+                )
             return {
                 "llm_inference_s": llm_s,
                 "tool_execution_s": tool_s,
@@ -2934,6 +2990,8 @@ Please show me the complete process including testing.""",
                 "coordination_pct": coord_pct,
                 "method": method,
                 "is_estimated": True,
+                "total_time_basis_s": round(execution_time, 2),
+                "phase_observation_status": "complete" if llm_s is not None else "no_llm_events",
             }
 
         llm_events = sum(1 for e in timeline if e["event_type"] in LLM_TYPES)
@@ -2949,18 +3007,26 @@ Please show me the complete process including testing.""",
             total_w = tool_w + coord_w or 1.0
             tool_s = round(execution_time * tool_w / total_w, 2)
             coord_s = round(execution_time - tool_s, 2)
+            _, tool_pct, coord_pct = self._time_breakdown_percentages(
+                total_time_s=execution_time,
+                llm_s=None,
+                tool_s=tool_s,
+                coord_s=coord_s,
+            )
             return {
                 "llm_inference_s": None,
                 "tool_execution_s": tool_s,
                 "coordination_s": coord_s,
                 "llm_inference_pct": None,
-                "tool_execution_pct": round(100 * tool_s / execution_time, 1) if execution_time else 0.0,
-                "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
+                "tool_execution_pct": tool_pct,
+                "coordination_pct": coord_pct,
                 "method": "timeline_weighted_no_llm_events",
                 "is_estimated": True,
                 "llm_events": 0,
                 "tool_events": tool_events,
                 "coord_events": coord_events,
+                "total_time_basis_s": round(execution_time, 2),
+                "phase_observation_status": "no_llm_events",
             }
 
         total_w = llm_w + tool_w + coord_w or 1.0
@@ -2968,19 +3034,27 @@ Please show me the complete process including testing.""",
         llm_s = round(execution_time * llm_w / total_w, 2)
         tool_s = round(execution_time * tool_w / total_w, 2)
         coord_s = round(execution_time - llm_s - tool_s, 2)  # absorb rounding error
+        llm_pct, tool_pct, coord_pct = self._time_breakdown_percentages(
+            total_time_s=execution_time,
+            llm_s=llm_s,
+            tool_s=tool_s,
+            coord_s=coord_s,
+        )
 
         return {
             "llm_inference_s": llm_s,
             "tool_execution_s": tool_s,
             "coordination_s": coord_s,
-            "llm_inference_pct": round(100 * llm_s / execution_time, 1) if execution_time else 0.0,
-            "tool_execution_pct": round(100 * tool_s / execution_time, 1) if execution_time else 0.0,
-            "coordination_pct": round(100 * coord_s / execution_time, 1) if execution_time else 0.0,
+            "llm_inference_pct": llm_pct,
+            "tool_execution_pct": tool_pct,
+            "coordination_pct": coord_pct,
             "method": "timeline_weighted",
             "is_estimated": True,
             "llm_events": llm_events,
             "tool_events": tool_events,
             "coord_events": coord_events,
+            "total_time_basis_s": round(execution_time, 2),
+            "phase_observation_status": "complete",
         }
 
     def _build_step_resource_profiles(
@@ -3384,33 +3458,79 @@ Please show me the complete process including testing.""",
             is_provisional=bool(primary.is_provisional),
         )
 
-        llm_samples = [
-            float(r.time_breakdown.get("llm_inference_s"))
-            for r in run_results
+        llm_observed_runs = [
+            r for r in run_results
             if r.time_breakdown.get("llm_inference_s") is not None
         ]
-        llm_mean: Optional[float] = float(statistics.fmean(llm_samples)) if llm_samples else None
+        if len(llm_observed_runs) == 0:
+            breakdown_runs = list(run_results)
+            llm_mean = None
+            phase_observation_status = "no_llm_events"
+            method = "multi_run_mean_no_llm_events"
+        elif len(llm_observed_runs) == run_count:
+            breakdown_runs = list(run_results)
+            llm_mean = float(
+                statistics.fmean(
+                    float(r.time_breakdown.get("llm_inference_s") or 0.0)
+                    for r in breakdown_runs
+                )
+            )
+            phase_observation_status = "complete"
+            method = "multi_run_mean"
+        else:
+            # Use the same observed subset for every phase so the displayed phase
+            # totals remain self-consistent when one phase is only observed in
+            # part of the repeated-run set.
+            breakdown_runs = list(llm_observed_runs)
+            llm_mean = float(
+                statistics.fmean(
+                    float(r.time_breakdown.get("llm_inference_s") or 0.0)
+                    for r in breakdown_runs
+                )
+            )
+            phase_observation_status = "partial_llm_observation"
+            method = "multi_run_mean_observed_subset"
+
+        breakdown_run_count = len(breakdown_runs) or run_count
+        breakdown_total_time = float(
+            statistics.fmean(
+                float(r.time_breakdown.get("total_time_basis_s", r.clear_metrics.total_task_time) or 0.0)
+                for r in breakdown_runs
+            )
+        ) if breakdown_runs else float(primary.clear_metrics.total_task_time or 0.0)
+        tool_mean = float(
+            statistics.fmean(
+                float(r.time_breakdown.get("tool_execution_s", 0.0) or 0.0)
+                for r in breakdown_runs
+            )
+        ) if breakdown_runs else 0.0
+        coord_mean = float(
+            statistics.fmean(
+                float(r.time_breakdown.get("coordination_s", 0.0) or 0.0)
+                for r in breakdown_runs
+            )
+        ) if breakdown_runs else 0.0
+        llm_pct, tool_pct, coord_pct = self._time_breakdown_percentages(
+            total_time_s=breakdown_total_time,
+            llm_s=llm_mean,
+            tool_s=tool_mean,
+            coord_s=coord_mean,
+        )
         primary.time_breakdown = {
             "llm_inference_s": llm_mean,
-            "tool_execution_s": _mean_metric(lambda r: r.time_breakdown.get("tool_execution_s", 0.0)),
-            "coordination_s": _mean_metric(lambda r: r.time_breakdown.get("coordination_s", 0.0)),
-            "method": "multi_run_mean",
+            "tool_execution_s": tool_mean,
+            "coordination_s": coord_mean,
+            "method": method,
             "is_estimated": True,
-            "llm_observed_runs": len(llm_samples),
+            "llm_observed_runs": len(llm_observed_runs),
             "aggregated_over_runs": run_count,
+            "breakdown_run_count": breakdown_run_count,
+            "total_time_basis_s": round(breakdown_total_time, 2),
+            "phase_observation_status": phase_observation_status,
         }
-        total_time = max(primary.clear_metrics.total_task_time, 1e-6)
-        primary.time_breakdown["llm_inference_pct"] = (
-            round(100.0 * primary.time_breakdown["llm_inference_s"] / total_time, 1)
-            if primary.time_breakdown["llm_inference_s"] is not None
-            else None
-        )
-        primary.time_breakdown["tool_execution_pct"] = round(
-            100.0 * primary.time_breakdown["tool_execution_s"] / total_time, 1
-        )
-        primary.time_breakdown["coordination_pct"] = round(
-            100.0 * primary.time_breakdown["coordination_s"] / total_time, 1
-        )
+        primary.time_breakdown["llm_inference_pct"] = llm_pct
+        primary.time_breakdown["tool_execution_pct"] = tool_pct
+        primary.time_breakdown["coordination_pct"] = coord_pct
 
         return primary
 
@@ -3574,6 +3694,9 @@ Please show me the complete process including testing.""",
         avg_time = sum(r.clear_metrics.total_task_time for r in results) / total_tests
         avg_steps = sum(r.clear_metrics.steps_to_completion for r in results) / total_tests
         avg_accuracy = sum(r.clear_metrics.task_completion_accuracy for r in results) / total_tests
+        avg_tool_accuracy = sum(r.clear_metrics.tool_selection_accuracy for r in results) / total_tests
+        avg_reasoning = sum(r.clear_metrics.reasoning_coherence for r in results) / total_tests
+        avg_error_recovery = sum(r.clear_metrics.error_recovery_effectiveness for r in results) / total_tests
         core_comparable_tests = sum(
             1 for r in results
             if r.comparability.get("core_status", r.comparability.get("status")) == "COMPARABLE"
@@ -3590,6 +3713,15 @@ Please show me the complete process including testing.""",
             1 for r in results if r.comparability.get("eligible_for_full_leaderboard")
         )
         avg_runs_per_task = sum(r.repeat_stats.get("run_count", 1) for r in results) / total_tests
+        any_cost_estimated = any(bool(r.clear_metrics.cost_is_estimated) for r in results)
+        checker_executed_count = sum(
+            1 for r in results if bool(r.evidence_quality.get("checker_executed", False))
+        )
+        all_checker_passed = checker_executed_count > 0 and all(
+            bool(r.evidence_quality.get("checker_passed", False))
+            for r in results
+            if bool(r.evidence_quality.get("checker_executed", False))
+        )
 
         def _mean_numeric(values: List[Any]) -> Optional[float]:
             numeric_values: List[float] = []
@@ -3613,15 +3745,44 @@ Please show me the complete process including testing.""",
         def _fmt_pct(value: Optional[float]) -> str:
             return f"{value}%" if value is not None else "n/a"
 
-        # Aggregate time breakdown across all results.
+        # Aggregate time breakdown across all results using each task's own time-basis
+        # metadata so the displayed phase totals remain self-consistent even when a
+        # phase is only observed in a subset of repeated runs.
+        avg_breakdown_total_s = _mean_numeric(
+            [r.time_breakdown.get("total_time_basis_s", r.clear_metrics.total_task_time) for r in results]
+        ) or avg_time
         avg_llm_s = _mean_numeric([r.time_breakdown.get("llm_inference_s") for r in results])
         avg_tool_s = _mean_numeric([r.time_breakdown.get("tool_execution_s") for r in results]) or 0.0
         avg_coord_s = _mean_numeric([r.time_breakdown.get("coordination_s") for r in results]) or 0.0
-        avg_llm_pct = round(100 * avg_llm_s / avg_time, 1) if (avg_time and avg_llm_s is not None) else None
-        avg_tool_pct = round(100 * avg_tool_s / avg_time, 1) if avg_time else 0.0
-        avg_coord_pct = round(100 * avg_coord_s / avg_time, 1) if avg_time else 0.0
+        avg_llm_pct, avg_tool_pct, avg_coord_pct = self._time_breakdown_percentages(
+            total_time_s=avg_breakdown_total_s,
+            llm_s=avg_llm_s,
+            tool_s=avg_tool_s,
+            coord_s=avg_coord_s,
+        )
+
+        partial_time_breakdown_notes = [
+            (
+                f"- `{result.test_case.name}`: LLM phase observed in "
+                f"{result.time_breakdown.get('llm_observed_runs', 0)}/"
+                f"{result.time_breakdown.get('aggregated_over_runs', result.repeat_stats.get('run_count', 1))} runs; "
+                "phase means in the table below use the observed subset to stay self-consistent."
+            )
+            for result in results
+            if result.time_breakdown.get("phase_observation_status") == "partial_llm_observation"
+        ]
         
         # Generate comprehensive report
+        checker_assurance_text = (
+            "All evaluated tasks passed checker-backed outcome validation"
+            if all_checker_passed
+            else (
+                "No checker-backed evidence was captured in this run set"
+                if checker_executed_count == 0
+                else "Some tasks relied on partial or mixed evidence"
+            )
+        )
+
         report = f"""# Agent CLEAR Framework Evaluation Report
 
 Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -3640,7 +3801,7 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 | **Average V2 Run Mean** | {avg_main_v2_run_mean:.3f}/1.000 | Mean of per-run main scores |
 | **Average V2 Diagnostic Score** | {avg_diag_v2_score:.3f}/1.000 | Diagnostic dimensions only |
 | **Average Score Coverage** | {avg_score_coverage:.3f} | Main-dimension observability coverage |
-| **Average Cost per Task** | ${avg_cost:.3f} USD | Economic efficiency |
+| **Average Cost per Task** | ${avg_cost:.3f} USD | {"Estimated cost snapshot" if any_cost_estimated else "Provider-reported economic efficiency"} |
 | **Average Task Time** | {avg_time:.1f} seconds | Execution speed |
 | **Average Steps** | {avg_steps:.1f} steps | Task efficiency |
 | **Average Accuracy** | {avg_accuracy:.3f}/1.000 | Output quality |
@@ -3656,9 +3817,9 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 ## 📊 CLEAR Dimension Analysis
 
 ### 💰 Cost Dimension
-- **API Usage**: LLM calls and token consumption
+- **Cost basis**: {"Estimated from token/call heuristics" if any_cost_estimated else "Provider-reported runtime cost"}
 - **Average cost per task**: ${avg_cost:.3f} USD
-- **Optimization level**: {"Good" if avg_cost < 0.1 else "Needs improvement"}
+- **Strict comparability**: {"Cost is advisory only in this run set" if any_cost_estimated else "Cost is eligible for strict comparison"}
 
 ### ⚡ Latency Dimension  
 - **Task completion speed**: {avg_time:.1f} seconds average
@@ -3666,17 +3827,18 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 
 ### 📈 Efficiency Dimension
 - **Average steps to completion**: {avg_steps:.1f} steps
-- **Resource utilization**: Memory and CPU usage
-- **Tool selection effectiveness**: Appropriate tool usage
+- **Average tool selection accuracy**: {avg_tool_accuracy:.3f}/1.000
+- **Resource attribution**: Estimated from timeline/resource snapshots
 
 ### ✅ Assurance Dimension
 - **Task completion accuracy**: {avg_accuracy:.3f}/1.000
-- **Output quality**: Correctness and completeness
-- **Reasoning coherence**: Logical problem-solving
+- **Checker-backed outcomes**: {checker_assurance_text}
+- **Average reasoning coherence**: {avg_reasoning:.3f}/1.000
 
 ### 🛠️ Reliability Dimension
-- **Execution stability**: Error handling and recovery
-- **System consistency**: Reproducible performance
+- **Threshold-gated pass rate**: {passed_tests}/{total_tests}
+- **Average error recovery effectiveness**: {avg_error_recovery:.3f}/1.000
+- **Repeat-run protocol**: {avg_runs_per_task:.1f} runs per task
 
 ---
 
@@ -3709,6 +3871,9 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 > Time is partitioned into three phases using timeline-weighted analysis
 > (method: `{results[0].time_breakdown.get("method", "n/a") if results else "n/a"}`).
 > If no LLM events are detected in a runtime trace, LLM time is reported as `n/a` (unknown).
+> For repeated runs, phase means use a consistent run subset per task. If a phase is
+> observed in only part of the run set, this section uses that observed subset rather
+> than mixing incompatible averages.
 
 ### Aggregate (across all tasks)
 
@@ -3717,7 +3882,7 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 | 🧠 LLM Inference | {_fmt_seconds(avg_llm_s)} | {_fmt_pct(avg_llm_pct)} |
 | 🔧 Tool Execution | {_fmt_seconds(avg_tool_s)} | {_fmt_pct(avg_tool_pct)} |
 | 🔄 Coordination | {_fmt_seconds(avg_coord_s)} | {_fmt_pct(avg_coord_pct)} |
-| **Total** | **{avg_time:.2f}s** | **100%** |
+| **Total** | **{avg_breakdown_total_s:.2f}s** | **100%** |
 
 ### Per-Task Breakdown
 
@@ -3726,7 +3891,7 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 """
         for result in results:
             bd = result.time_breakdown
-            total = result.clear_metrics.total_task_time
+            total = float(bd.get("total_time_basis_s", result.clear_metrics.total_task_time) or 0.0)
             llm_s = bd.get("llm_inference_s")
             llm_pct = bd.get("llm_inference_pct")
             tool_s = bd.get("tool_execution_s")
@@ -3743,6 +3908,11 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
                 f"| {_fmt_pct(coord_pct)} "
                 f"| {total:.2f} |\n"
             )
+
+        if partial_time_breakdown_notes:
+            report += "\nObserved-subset notes:\n\n"
+            report += "\n".join(partial_time_breakdown_notes)
+            report += "\n"
 
         # ── Per-Step Resource Attribution ─────────────────────────────────────
         report += """
@@ -3776,13 +3946,23 @@ position in the log against wall-clock timestamps captured by the resource monit
         all_recommendations = []
         for result in results:
             all_recommendations.extend(result.recommendations)
-        
-        # Count recommendation frequency
-        rec_counts = {}
-        for rec in all_recommendations:
-            key = rec[:30]  # First 30 chars as key
-            rec_counts[key] = rec_counts.get(key, 0) + 1
-        
+
+        actionable_recommendations = [
+            rec for rec in all_recommendations
+            if self._recommendation_kind(rec) == "actionable"
+        ]
+        informational_recommendations = [
+            rec for rec in all_recommendations
+            if self._recommendation_kind(rec) == "informational"
+        ]
+        positive_recommendations = [
+            rec for rec in all_recommendations
+            if self._recommendation_kind(rec) == "positive"
+        ]
+
+        actionable_counts = self._recommendation_counts(actionable_recommendations)
+        informational_counts = self._recommendation_counts(informational_recommendations)
+
         report += f"""
 
 ---
@@ -3791,21 +3971,26 @@ position in the log against wall-clock timestamps captured by the resource monit
 
 ### 🔥 Most Critical Issues:
 """
-        
-        sorted_recs = sorted(rec_counts.items(), key=lambda x: x[1], reverse=True)[:5]
-        for rec_key, count in sorted_recs:
-            full_rec = next(rec for rec in all_recommendations if rec.startswith(rec_key))
-            report += f"- **({count}x)** {full_rec}\n"
+
+        if actionable_counts:
+            for recommendation, count in actionable_counts[:5]:
+                report += f"- **({count}x)** {recommendation}\n"
+        else:
+            report += "- (none)\n"
 
         strengths: List[str] = []
-        if avg_time <= 60:
-            strengths.append("✅ Fast execution times")
-        if avg_cost <= 0.2:
-            strengths.append("✅ Cost-effective operation")
-        if avg_accuracy >= 0.7:
-            strengths.append("✅ High accuracy scores")
-        if avg_steps <= 10:
-            strengths.append("✅ Efficient step usage")
+        if passed_tests == total_tests:
+            strengths.append("✅ All evaluated tasks passed threshold gates")
+        if all_checker_passed:
+            strengths.append("✅ Checker-backed outcome validation passed on all evaluated tasks")
+        if full_comparable_tests == total_tests and provisional_tests == 0:
+            strengths.append("✅ Full comparability observed on all evaluated tasks")
+        if avg_time <= 20:
+            strengths.append("✅ Fast execution times on the evaluated suite")
+        if avg_tool_accuracy >= 0.85 and avg_steps <= 8:
+            strengths.append("✅ Efficient tool usage on the evaluated suite")
+        if positive_recommendations and not strengths:
+            strengths.append("✅ No actionable report-level issues were generated")
 
         failed_tests = [r for r in results if not r.passed_all_thresholds]
         oracle_gate_failures = sum(
@@ -3838,13 +4023,13 @@ position in the log against wall-clock timestamps captured by the resource monit
             improvements.append(
                 f"⚠️ Critical function gate failed in {critical_gate_failures}/{total_tests} tasks"
             )
-        if avg_time > 90:
+        for recommendation, _ in actionable_counts[:5]:
+            improvements.append(recommendation)
+        if avg_time > 90 and not any("Task taking too long" in item for item in improvements):
             improvements.append("⚠️ Optimize execution time")
-        if avg_cost > 0.3:
-            improvements.append("⚠️ Reduce operational costs")
-        if avg_accuracy < 0.6:
+        if avg_accuracy < 0.6 and not any("Improve task completion" in item for item in improvements):
             improvements.append("⚠️ Improve task accuracy")
-        if avg_steps > 15:
+        if avg_steps > 15 and not any("Too many steps" in item for item in improvements):
             improvements.append("⚠️ Optimize step efficiency")
 
         deduped_improvements: List[str] = []
@@ -3860,6 +4045,42 @@ position in the log against wall-clock timestamps captured by the resource monit
 
         strengths_md = "\n".join(f"- {item}" for item in strengths)
         improvements_md = "\n".join(f"- {item}" for item in improvements)
+        caveats_md = "\n".join(
+            f"- **({count}x)** {recommendation}"
+            for recommendation, count in informational_counts[:5]
+        ) if informational_counts else "- (none)"
+
+        has_blocking_failures = bool(
+            failed_tests
+            or oracle_gate_failures
+            or safety_gate_failures
+            or critical_gate_failures
+            or provisional_tests
+            or main_eligible_tests < total_tests
+            or full_eligible_tests < total_tests
+        )
+        has_actionable_issues = bool(actionable_counts)
+        if not has_blocking_failures and not has_actionable_issues and not any_cost_estimated:
+            readiness_label = "✅ READY"
+        elif not has_blocking_failures:
+            readiness_label = "⚠️ READY WITH CAVEATS"
+        else:
+            readiness_label = "❌ NEEDS VALIDATION"
+
+        next_steps = []
+        if has_blocking_failures:
+            next_steps.append("Address failing gates or missing comparability signals")
+        else:
+            next_steps.append("Validate on a broader task suite before treating this as production-ready")
+        if has_actionable_issues:
+            next_steps.append("Fix the highest-frequency actionable issues in the report")
+        else:
+            next_steps.append("Monitor for regressions as runtime/parser behavior changes")
+        if any_cost_estimated:
+            next_steps.append("Treat cost conclusions as advisory until provider-reported cost is available")
+        else:
+            next_steps.append("Track cost drift alongside latency and checker-backed accuracy")
+        next_steps.append("Establish deployment SLAs using checker-backed pass rate and comparability fields")
 
         report += f"""
 
@@ -3869,17 +4090,23 @@ position in the log against wall-clock timestamps captured by the resource monit
 ### ⚠️ Areas for Improvement:
 {improvements_md}
 
+### 📝 Reporting Caveats:
+{caveats_md}
+
 ---
 
 ## 🚀 Production Readiness
 
-### Ready for Deployment: {"✅ YES" if passed_tests/total_tests >= 0.8 and avg_time <= 120 and avg_cost <= 0.5 else "❌ NEEDS OPTIMIZATION"}
+### Ready for Deployment: {readiness_label}
 
 ### Next Steps:
-1. {"Address identified performance issues" if passed_tests/total_tests < 0.8 else "Deploy with monitoring"}
-2. {"Optimize cost and latency" if avg_cost > 0.2 or avg_time > 60 else "Scale for production load"}
-3. {"Improve error handling" if any("error" in rec.lower() for rec in all_recommendations) else "Enhance monitoring"}
-4. Establish production SLAs based on CLEAR metrics
+1. {next_steps[0]}
+2. {next_steps[1]}
+3. {next_steps[2]}
+4. {next_steps[3]}
+
+Production-readiness status is advisory for the evaluated task suite only. It is
+not a substitute for larger-scale staging, security review, or workload-specific validation.
 
 ---
 

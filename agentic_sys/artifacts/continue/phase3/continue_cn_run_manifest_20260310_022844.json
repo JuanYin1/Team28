@@ -1,0 +1,16 @@
+{
+  "schema_version": "phase3.run_manifest.v1",
+  "run_id": "20260310_022844",
+  "agent_id": "continue-cn",
+  "results_dir": "artifacts/continue/phase3",
+  "generated_at": "2026-03-10T02:32:13.669697",
+  "artifacts": [
+    "continue_cn_simple_file_operations_1773134958.json",
+    "continue_cn_python_coding_task_1773134992.json",
+    "continue_cn_data_analysis_task_1773135083.json",
+    "continue_cn_error_handling_test_1773135133.json",
+    "continue_cn_clear_report_20260310_022844.md",
+    "continue_cn_leaderboard_core_20260310_022844.csv",
+    "continue_cn_leaderboard_full_20260310_022844.csv"
+  ]
+}

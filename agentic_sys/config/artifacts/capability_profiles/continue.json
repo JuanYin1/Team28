@@ -3,7 +3,7 @@
     "auto_generated": true,
     "do_not_edit_manually": true,
     "notice": "AUTO-GENERATED FILE. DO NOT EDIT MANUALLY. Regenerate with --refresh-capability-profile or --probe-agent.",
-    "generated_at_utc": "2026-03-10T08:27:12Z"
+    "generated_at_utc": "2026-03-10T09:28:44Z"
   },
   "agent_id": "continue",
   "declared_capabilities": {
@@ -27,9 +27,9 @@
     "tool_trace": true,
     "step_trace": true,
     "timeline_events": true,
-    "session_stats": false,
+    "session_stats": true,
     "provider_cost": true,
-    "token_usage": false,
+    "token_usage": true,
     "skills_runtime": true,
     "checker_support": {
       "file_artifacts": true,
@@ -58,32 +58,32 @@
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 11.01439905166626,
-      "wall_clock_duration_s": 11.026106834411621,
+      "reported_duration_s": 9.050113916397095,
+      "wall_clock_duration_s": 9.063288927078247,
       "artifact_exists": true
     },
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 7.480345010757446,
-      "wall_clock_duration_s": 7.495035171508789,
+      "reported_duration_s": 9.042817831039429,
+      "wall_clock_duration_s": 9.053982019424438,
       "artifact_exists": false
     },
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 7.8170270919799805,
-      "wall_clock_duration_s": 7.829311847686768,
+      "reported_duration_s": 7.504746913909912,
+      "wall_clock_duration_s": 7.5152318477630615,
       "artifact_exists": false
     },
     {
       "success": true,
       "return_code": 0,
-      "reported_duration_s": 4.408104181289673,
-      "wall_clock_duration_s": 4.41813588142395,
+      "reported_duration_s": 5.574493169784546,
+      "wall_clock_duration_s": 5.586936950683594,
       "artifact_exists": false
     }
   ],
-  "generated_at_unix": 1773131232,
-  "generated_at_utc": "2026-03-10T08:27:12Z"
+  "generated_at_unix": 1773134924,
+  "generated_at_utc": "2026-03-10T09:28:44Z"
 }
