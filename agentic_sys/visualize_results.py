@@ -6,7 +6,7 @@ Generates detailed charts for per-step resource usage and execution time from
 the JSON result files produced by clear_evaluation_system.py.
 
 Usage:
-    # auto-pick the latest result in artifacts/mini-agent/phase3/
+    # auto-pick the latest run in artifacts/<agent>/phase3/ and generate all task dashboards
     python visualize_results.py
 
     # specific file
@@ -21,20 +21,74 @@ Outputs a PNG file next to each input JSON, plus an optional comparison PNG.
 import json
 import sys
 import argparse
+import os
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from glob import glob
 
-try:
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as mpatches
-    from matplotlib.gridspec import GridSpec
-    import numpy as np
-except ImportError:
-    print("Required packages not found. Install with:  pip install matplotlib numpy")
-    sys.exit(1)
+from agent_runtime.script_config import read_agent_config, resolve_script_runtime_options
+
+plt = None
+mpatches = None
+GridSpec = None
+np = None
+
+_PLOT_ENV_SENTINEL = "TEAM28_PLOT_ENV_READY"
+
+
+def _configure_scientific_runtime_env() -> None:
+    """
+    Keep plotting imports in a single-threaded/serial mode.
+
+    On this machine, NumPy/Matplotlib can load Intel OpenMP and fail with
+    SHM-related runtime errors when trying to initialize shared-memory worker
+    state. Setting these defaults before import keeps visualization stable.
+    """
+    defaults = {
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "KMP_LIBRARY": "serial",
+    }
+    for key, value in defaults.items():
+        os.environ.setdefault(key, value)
+
+
+def _ensure_subprocess_safe_plot_env() -> None:
+    """
+    Re-exec once with plotting-safe env vars applied from process start.
+
+    Some MKL/OpenMP builds read thread/runtime settings before Python-level lazy
+    imports happen. Re-executing early gives those libraries a clean process
+    environment and avoids SHM initialization crashes on restricted machines.
+    """
+    if os.environ.get(_PLOT_ENV_SENTINEL) == "1":
+        return
+    _configure_scientific_runtime_env()
+    os.environ[_PLOT_ENV_SENTINEL] = "1"
+    os.execvpe(sys.executable, [sys.executable, *sys.argv], os.environ)
+
+
+def _ensure_plotting_deps() -> None:
+    global plt, mpatches, GridSpec, np
+    if plt is not None and np is not None and GridSpec is not None and mpatches is not None:
+        return
+    _configure_scientific_runtime_env()
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        import matplotlib.patches as _mpatches
+        from matplotlib.gridspec import GridSpec as _GridSpec
+        import numpy as _np
+    except ImportError:
+        print("Required packages not found. Install with:  pip install matplotlib numpy")
+        sys.exit(1)
+    plt = _plt
+    mpatches = _mpatches
+    GridSpec = _GridSpec
+    np = _np
 
 # ---------------------------------------------------------------------------
 # Colour palette (pure ASCII string keys)
@@ -81,10 +135,72 @@ def load_result(path: Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def _is_visualizable_result_payload(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    test_case = payload.get("test_case")
+    performance = payload.get("performance")
+    if not isinstance(test_case, dict) or not isinstance(performance, dict):
+        return False
+    return "name" in test_case and "overall_clear_score" in performance
+
+
+def _is_visualizable_result_file(path: Path) -> bool:
+    if path.name.endswith("_run_manifest.json") or "_run_manifest_" in path.name:
+        return False
+    try:
+        return _is_visualizable_result_payload(load_result(path))
+    except Exception:
+        return False
+
+
 def latest_result(results_dir: Path = Path("phase3")) -> Optional[Path]:
-    files = sorted(results_dir.glob("*.json"),
-                   key=lambda p: p.stat().st_mtime, reverse=True)
+    files = sorted(
+        (path for path in results_dir.glob("*.json") if _is_visualizable_result_file(path)),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return files[0] if files else None
+
+
+def latest_run_manifest(results_dir: Path = Path("phase3")) -> Optional[Path]:
+    manifests = sorted(
+        (
+            path
+            for path in results_dir.glob("*_run_manifest_*.json")
+            if path.is_file()
+        ),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return manifests[0] if manifests else None
+
+
+def result_files_from_manifest(manifest_path: Path) -> List[Path]:
+    try:
+        payload = load_result(manifest_path)
+    except Exception:
+        return []
+    if not isinstance(payload, dict):
+        return []
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        return []
+
+    resolved: List[Path] = []
+    seen = set()
+    base_dir = manifest_path.parent
+    for rel in artifacts:
+        candidate = (base_dir / str(rel)).resolve()
+        if not candidate.exists():
+            continue
+        if not _is_visualizable_result_file(candidate):
+            continue
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        resolved.append(candidate)
+    return resolved
 
 
 def _step_spans(profiles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -166,7 +282,7 @@ def _step_spans(profiles: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 # Individual chart functions
 # ---------------------------------------------------------------------------
 
-def plot_time_breakdown_bar(ax: plt.Axes, result: Dict[str, Any]) -> None:
+def plot_time_breakdown_bar(ax: Any, result: Dict[str, Any]) -> None:
     """Horizontal stacked bar: LLM / Tool / Coordination."""
     bd = result.get("time_breakdown", {})
     if not bd:
@@ -180,11 +296,15 @@ def plot_time_breakdown_bar(ax: plt.Axes, result: Dict[str, Any]) -> None:
         ("tool_execution_s", "Tool Execution", PHASE_COLORS["tool_execution"]),
         ("coordination_s",   "Coordination",   PHASE_COLORS["coordination"]),
     ]
-    total = sum(bd.get(k, 0) for k, _, _ in keys) or 1.0
+    values = {}
+    for key, _, _ in keys:
+        raw_value = bd.get(key, 0)
+        values[key] = raw_value if isinstance(raw_value, (int, float)) and raw_value is not None else 0.0
+    total = sum(values[k] for k, _, _ in keys) or 1.0
 
     left = 0.0
     for key, label, color in keys:
-        val = bd.get(key, 0)
+        val = values[key]
         pct = val / total * 100
         ax.barh(0, val, left=left, color=color,
                 edgecolor="white", linewidth=1.5, height=0.5)
@@ -217,7 +337,13 @@ def plot_time_breakdown_bar(ax: plt.Axes, result: Dict[str, Any]) -> None:
         ax.spines[spine].set_visible(False)
 
 
-def plot_clear_radar(ax: plt.Axes, result: Dict[str, Any]) -> None:
+def _numeric_value(value: Any, default: float = 0.0) -> float:
+    if isinstance(value, (int, float)) and value is not None:
+        return float(value)
+    return float(default)
+
+
+def plot_clear_radar(ax: Any, result: Dict[str, Any]) -> None:
     """Radar / spider chart for the 5 CLEAR dimension scores."""
     dims = result.get("performance", {}).get("dimension_scores", {})
     if not dims:
@@ -256,7 +382,7 @@ def plot_clear_radar(ax: plt.Axes, result: Dict[str, Any]) -> None:
     )
 
 
-def plot_gantt_timeline(ax: plt.Axes, result: Dict[str, Any]) -> None:
+def plot_gantt_timeline(ax: Any, result: Dict[str, Any]) -> None:
     """
     Gantt-style timeline.
     Y-axis = step, X-axis = wall-clock offset (seconds).
@@ -357,7 +483,7 @@ def plot_gantt_timeline(ax: plt.Axes, result: Dict[str, Any]) -> None:
     ax.spines["right"].set_visible(False)
 
 
-def plot_resource_over_time(ax: plt.Axes, result: Dict[str, Any],
+def plot_resource_over_time(ax: Any, result: Dict[str, Any],
                              resource: str = "memory_mb") -> None:
     """Line chart of memory_mb or cpu_percent across all timeline events."""
     profiles = result.get("step_resource_profiles", [])
@@ -400,7 +526,7 @@ def plot_resource_over_time(ax: plt.Axes, result: Dict[str, Any],
     ax.spines["right"].set_visible(False)
 
 
-def plot_event_distribution(ax: plt.Axes, result: Dict[str, Any]) -> None:
+def plot_event_distribution(ax: Any, result: Dict[str, Any]) -> None:
     """Horizontal bar chart: count of each event type."""
     profiles = result.get("step_resource_profiles", [])
     if not profiles:
@@ -428,7 +554,7 @@ def plot_event_distribution(ax: plt.Axes, result: Dict[str, Any]) -> None:
     ax.spines["right"].set_visible(False)
 
 
-def plot_step_duration_breakdown(ax: plt.Axes, result: Dict[str, Any]) -> None:
+def plot_step_duration_breakdown(ax: Any, result: Dict[str, Any]) -> None:
     """
     Grouped bar per step: LLM thinking time vs Tool/response time.
     Derived directly from event timestamps.
@@ -563,9 +689,9 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
     ax = axes[0, 0]
     x  = np.arange(n)
     w  = 0.25
-    llm_vals   = [r.get("time_breakdown", {}).get("llm_inference_s",  0) for r in results]
-    tool_vals  = [r.get("time_breakdown", {}).get("tool_execution_s", 0) for r in results]
-    coord_vals = [r.get("time_breakdown", {}).get("coordination_s",   0) for r in results]
+    llm_vals   = [_numeric_value(r.get("time_breakdown", {}).get("llm_inference_s", 0)) for r in results]
+    tool_vals  = [_numeric_value(r.get("time_breakdown", {}).get("tool_execution_s", 0)) for r in results]
+    coord_vals = [_numeric_value(r.get("time_breakdown", {}).get("coordination_s", 0)) for r in results]
 
     ax.bar(x - w, llm_vals,   w * 1.9, label="LLM Inference",
            color=PHASE_COLORS["llm_inference"],  edgecolor="white")
@@ -585,7 +711,7 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
     ax = axes[0, 1]
     dim_keys = ["cost", "latency", "efficiency", "assurance", "reliability"]
     for i, dk in enumerate(dim_keys):
-        vals = [r.get("performance", {}).get("dimension_scores", {}).get(dk, 0)
+        vals = [_numeric_value(r.get("performance", {}).get("dimension_scores", {}).get(dk, 0))
                 for r in results]
         col  = list(CLEAR_COLORS.values())[i]
         ax.plot(labels, vals, marker="o", label=dk.capitalize(), color=col, linewidth=1.8)
@@ -601,8 +727,8 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
 
     # -- Steps & tools --------------------------------------------------------
     ax = axes[1, 0]
-    steps = [r.get("clear_metrics", {}).get("steps_to_completion", 0) for r in results]
-    tools = [len(r.get("execution", {}).get("tools_used", []))          for r in results]
+    steps = [_numeric_value(r.get("clear_metrics", {}).get("steps_to_completion", 0)) for r in results]
+    tools = [_numeric_value(len(r.get("execution", {}).get("tools_used", []))) for r in results]
     ax.bar(x - 0.2, steps, 0.35, label="Steps",        color="#9B59B6", edgecolor="white")
     ax.bar(x + 0.2, tools, 0.35, label="Unique Tools", color="#1ABC9C", edgecolor="white")
     ax.set_xticks(x)
@@ -615,12 +741,12 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
 
     # -- Overall CLEAR score bar ----------------------------------------------
     ax = axes[1, 1]
-    scores = [r.get("performance", {}).get("overall_clear_score", 0) for r in results]
+    scores = [_numeric_value(r.get("performance", {}).get("overall_clear_score", 0)) for r in results]
     colors = [
         "#2ECC71" if r.get("performance", {}).get("passed_thresholds") else "#E74C3C"
         for r in results
     ]
-    bars = ax.bar(labels, scores, color=colors, edgecolor="white", linewidth=0.8)
+    bars = ax.bar(x, scores, color=colors, edgecolor="white", linewidth=0.8)
     for bar, score in zip(bars, scores):
         ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
                 "%.3f" % score, ha="center", va="bottom",
@@ -630,6 +756,7 @@ def generate_comparison(results: List[Dict[str, Any]], labels: List[str],
     ax.set_ylim(0, 1.15)
     ax.set_ylabel("Overall CLEAR Score")
     ax.set_title("Overall CLEAR Score Comparison")
+    ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
     ax.legend(fontsize=8)
     ax.spines["top"].set_visible(False)
@@ -652,18 +779,48 @@ def parse_args() -> argparse.Namespace:
         epilog=__doc__,
     )
     p.add_argument(
-        "files", nargs="*",
-        help="JSON result file(s). Defaults to the latest file in artifacts/mini-agent/phase3/.",
+        "--agent",
+        default="mini-agent",
+        help="Agent whose phase3 results dir should be used when no files are specified.",
     )
     p.add_argument(
-        "--results-dir", default="artifacts/mini-agent/phase3",
-        help="Directory to search when no files are specified (default: artifacts/mini-agent/phase3/).",
+        "--agent-config",
+        default=None,
+        help="Optional path to agent config YAML (defaults to config/config.yaml).",
+    )
+    p.add_argument(
+        "files", nargs="*",
+        help="JSON result file(s). Defaults to all task result JSON files from the latest run manifest for --agent.",
+    )
+    p.add_argument(
+        "--results-dir", default=None,
+        help="Directory to search when no files are specified. Overrides config.yaml.",
     )
     return p.parse_args()
 
 
+def _resolve_visualization_settings(args: argparse.Namespace) -> tuple[str, str]:
+    results_dir, _, _ = resolve_script_runtime_options(
+        args=args,
+        script_name="phase3",
+        default_results_dir="artifacts/mini-agent/phase3",
+    )
+    config_data, _ = read_agent_config(getattr(args, "agent_config", None))
+    visualization_cfg = config_data.get("visualization") or {}
+    if not isinstance(visualization_cfg, dict):
+        visualization_cfg = {}
+    comparison_filename = str(
+        visualization_cfg.get("comparison_filename", "comparison_dashboard.png")
+    ).strip() or "comparison_dashboard.png"
+    return results_dir, comparison_filename
+
+
 def main() -> None:
+    _ensure_subprocess_safe_plot_env()
     args = parse_args()
+    resolved_results_dir, comparison_filename = _resolve_visualization_settings(args)
+    results_dir = args.results_dir or resolved_results_dir
+    _ensure_plotting_deps()
 
     if args.files:
         expanded: List[Path] = []
@@ -672,11 +829,15 @@ def main() -> None:
             expanded.extend(matched if matched else [Path(pattern)])
         paths = expanded
     else:
-        found = latest_result(Path(args.results_dir))
-        if found is None:
-            print("No JSON files found in %s/" % args.results_dir)
+        manifest = latest_run_manifest(Path(results_dir))
+        if manifest is not None:
+            paths = result_files_from_manifest(manifest)
+        else:
+            found = latest_result(Path(results_dir))
+            paths = [found] if found is not None else []
+        if not paths:
+            print("No visualizable task result JSON files found in %s/" % results_dir)
             sys.exit(1)
-        paths = [found]
 
     print("\nVisualizing %d result file(s):\n" % len(paths))
 
@@ -690,20 +851,27 @@ def main() -> None:
             continue
         print("  Loading: %s" % path.name)
         result = load_result(path)
+        if not _is_visualizable_result_payload(result):
+            print("  [skip] not a task result JSON: %s" % path.name)
+            continue
         results.append(result)
         labels.append(result.get("test_case", {}).get("name", path.stem)[:30])
 
         out_path = path.with_suffix(".png")
         generate_dashboard(result, out_path)
 
+    if not results:
+        print("\nNo visualizable task result JSON files were found.")
+        sys.exit(1)
+
     if len(results) > 1:
         if args.files:
             parent_dirs = {Path(p).parent.resolve() for p in paths if Path(p).exists()}
             comp_dir = parent_dirs.pop() if len(parent_dirs) == 1 else Path.cwd()
         else:
-            comp_dir = Path(args.results_dir)
+            comp_dir = Path(results_dir)
         comp_dir.mkdir(parents=True, exist_ok=True)
-        comp_path = comp_dir / "comparison_dashboard.png"
+        comp_path = comp_dir / comparison_filename
         print("\n  Generating comparison dashboard for %d results..." % len(results))
         generate_comparison(results, labels, comp_path)
 
