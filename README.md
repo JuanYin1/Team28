@@ -120,7 +120,39 @@ Mini-SWE-Agent:
 - phase3: `artifacts/mini-swe-agent/phase3/`
 - single test: `artifacts/mini-swe-agent/phase3/single_test/`
 
-## 5) Add a new agent (YAML-only)
+## 5) Visualize Phase 3 Results (execution graph + dashboards)
+
+Script:
+- `agentic_sys/visualize_results.py`
+
+Install plotting deps once if needed:
+
+```bash
+python3.12 -m pip install matplotlib numpy
+```
+
+From `agentic_sys/`, generate charts for all phase3 tasks of each agent:
+
+```bash
+python3.12 visualize_results.py "artifacts/mini-agent/phase3/*.json"
+python3.12 visualize_results.py "artifacts/continue/phase3/*.json"
+python3.12 visualize_results.py "artifacts/mini-swe-agent/phase3/*.json"
+```
+
+What gets generated:
+- One dashboard PNG per task JSON (includes execution time breakdown, CLEAR radar, per-step timeline/execution graph, event distribution, memory/CPU curves).
+- One `comparison_dashboard.png` per phase3 folder when multiple JSON files are provided.
+
+Single-task visualization example:
+
+```bash
+python3.12 visualize_results.py artifacts/continue/phase3/continue_cn_simple_file_operations_1773112304.json
+```
+
+Default behavior (no file args):
+- Script visualizes only the latest JSON in `artifacts/mini-agent/phase3/` unless you pass `--results-dir`.
+
+## 6) Add a new agent (YAML-only)
 
 Follow:
 - `docs/new_agent_onboarding.md`
@@ -131,14 +163,14 @@ You only need to add a profile in `config/config.yaml`, then run with:
 python run_single_test.py --agent <new-agent-name-or-alias>
 ```
 
-## 6) Notes
+## 7) Notes
 
 - Use `--agent` explicitly in all scripts.
 - Do not commit API keys/secrets.
 - Continue defaults (workspace/model) are controlled in `config/config.yaml`.
 - Non-billing adapter health checks are available in `agent_runtime/safe_healthcheck.py`.
 
-## 7) Unit Tests (Required)
+## 8) Unit Tests (Required)
 
 Before you submit changes, ensure unit tests pass at minimum.
 
