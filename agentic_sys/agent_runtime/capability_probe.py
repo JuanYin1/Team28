@@ -137,6 +137,7 @@ def run_capability_probe(
             elapsed = max(0.0, time.time() - started)
             metadata = execution.metadata if isinstance(execution.metadata, dict) else {}
             trace_chunks = metadata.get("trace_log_chunks", [])
+            structured_timeline = metadata.get("structured_timeline", [])
             trace_text_parts = []
             if isinstance(trace_chunks, list):
                 for chunk in trace_chunks:
@@ -145,6 +146,26 @@ def run_capability_probe(
                     text = str(chunk.get("text", "")).strip()
                     if text:
                         trace_text_parts.append(text)
+            timeline_text_parts = []
+            if isinstance(structured_timeline, list):
+                for event in structured_timeline:
+                    if not isinstance(event, dict):
+                        continue
+                    event_type = str(event.get("event_type", "")).strip()
+                    step = event.get("step")
+                    tool_name = str(event.get("tool_name", "")).strip()
+                    content = str(event.get("content", "")).strip()
+                    line = " ".join(
+                        part for part in [
+                            f"event_type:{event_type}" if event_type else "",
+                            f"step:{step}" if step is not None else "",
+                            f"tool:{tool_name}" if tool_name else "",
+                            content,
+                        ]
+                        if part
+                    ).strip()
+                    if line:
+                        timeline_text_parts.append(line)
             probe_results.append(
                 {
                     "prompt": prompt,
@@ -152,6 +173,7 @@ def run_capability_probe(
                     "stdout": execution.stdout or "",
                     "stderr": execution.stderr or "",
                     "trace_text": "\n".join(trace_text_parts),
+                    "timeline_text": "\n".join(timeline_text_parts),
                     "success": bool(execution.success),
                     "return_code": execution.return_code,
                     "reported_duration_s": float(execution.execution_time_seconds or 0.0),
@@ -162,23 +184,30 @@ def run_capability_probe(
         if progress_callback:
             progress_callback(idx, total_prompts, "done")
 
+    successful_probe_results = [
+        item for item in probe_results
+        if bool(item.get("success"))
+    ]
+    evidence_results = successful_probe_results
+    checker_evidence_results = successful_probe_results or probe_results
+
     all_text = "\n".join(
         (
-            f"{item['stdout']}\n{item['stderr']}\n{item.get('trace_text', '')}"
-            for item in probe_results
+            f"{item['stdout']}\n{item['stderr']}\n{item.get('trace_text', '')}\n{item.get('timeline_text', '')}"
+            for item in evidence_results
         )
     ).lower()
-    artifact_probe = probe_results[0]
+    artifact_probe = checker_evidence_results[0]
 
     probed_caps["checker_support"]["file_artifacts"] = bool(artifact_probe.get("artifact_exists"))
-    probed_caps["checker_support"]["stdout_capture"] = any(item["stdout"].strip() for item in probe_results)
-    probed_caps["checker_support"]["exit_code"] = any(item.get("return_code") is not None for item in probe_results)
+    probed_caps["checker_support"]["stdout_capture"] = any(item["stdout"].strip() for item in checker_evidence_results)
+    probed_caps["checker_support"]["exit_code"] = any(item.get("return_code") is not None for item in checker_evidence_results)
     probed_caps["checker_support"]["behavior_validation"] = bool(
         re.search(r"(error|failed|exception).*(fix|correct|retry|success)", all_text, re.DOTALL)
     )
 
     step_signal = re.search(
-        r"(?im)(?:\bstep\s+\d+\b|\"step\"\s*:\s*\d+|^\s*\d+\.)",
+        r"(?im)(?:\bstep\s+\d+\b|\"step\"\s*:\s*\d+|\bstep:\s*\d+\b|^\s*\d+\.)",
         all_text,
     )
     tool_signal = re.search(

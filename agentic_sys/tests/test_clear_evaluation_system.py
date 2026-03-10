@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -483,6 +484,10 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.clear_metrics.output_quality_score, 1.0)
         self.assertEqual(result.tools_used, ["write_file", "read_file"])
+        self.assertEqual(
+            [profile["event_type"] for profile in result.step_resource_profiles],
+            ["thinking", "assistant_response", "tool_call", "success"],
+        )
 
     async def test_failed_execution_is_hard_gate_for_threshold_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -536,6 +541,60 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.clear_metrics.execution_success_rate, 0.0)
         self.assertFalse(result.passed_all_thresholds)
+
+    async def test_step_resource_profiles_preserve_low_cpu_precision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(results_dir=tmp, runtime_path="mini-agent")
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+            )
+
+            fake_log_analysis = {
+                "total_steps": 1,
+                "tools_used": [],
+                "tool_call_count": 0,
+                "thinking_blocks": 0,
+                "assistant_responses": 1,
+                "errors_encountered": 0,
+                "successful_operations": 1,
+                "step_breakdown": [],
+                "execution_timeline": [],
+                "session_stats": {},
+                "log_sources": ["stdout"],
+                "session_duration": {},
+                "tool_timings": [],
+                "detailed_timeline": [
+                    {"event_type": "assistant_response", "step": 1, "line": 1},
+                ],
+                "has_structured_trace": True,
+                "trace_signal_quality": 0.8,
+            }
+            eval_result = EvaluationResult(
+                overall_score=0.9,
+                passed=True,
+                confidence=0.9,
+                correctness_score=0.9,
+                completeness_score=0.9,
+                reasoning_score=0.9,
+                efficiency_score=1.0,
+                execution_score=1.0,
+                failed_criteria=[],
+                reasoning="ok",
+            )
+
+            with patch.object(evaluator, "execute_agent_task", AsyncMock(return_value=("stdout", "", True, 2.0))), \
+                 patch.object(evaluator.resource_monitor, "start_monitoring"), \
+                 patch.object(evaluator.resource_monitor, "stop_monitoring", return_value=(2.0, 64.0, 0.08929779804230216)), \
+                 patch.object(evaluator.resource_monitor, "get_resource_at", return_value=(64.0, 0.08929779804230216)), \
+                 patch.object(evaluator.log_analyzer, "analyze_execution_log", return_value=fake_log_analysis), \
+                 patch.object(evaluator.advanced_evaluator, "evaluate_response", return_value=eval_result):
+                result = await evaluator.evaluate_agent_test(test_case)
+
+        self.assertEqual(result.step_resource_profiles[0]["cpu_percent"], 0.089)
 
     async def test_estimated_cost_does_not_hard_fail_thresholds(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -677,6 +736,9 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
                 clear_metrics=AgentCLEARMetrics(total_task_time=1.0, steps_to_completion=1),
                 evaluation_result=EvaluationResult(overall_score=0.8, passed=True, confidence=0.8),
                 agent_output="ok",
+                agent_error_output="warn",
+                execution_logs="ok\nwarn",
+                file_artifacts={"result.txt": "15"},
                 overall_clear_score=0.8,
                 passed_all_thresholds=True,
                 confidence_score=0.8,
@@ -684,6 +746,7 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
                 recommendations=["good"],
                 time_breakdown={"method": "timeline_weighted"},
                 step_resource_profiles=[],
+                repeat_stats={"overall_v2_mean": 0.75, "overall_v2_aggregated_score": 0.8},
             )
 
             await evaluator._save_result(result)
@@ -698,6 +761,11 @@ class AgentClearEvaluatorTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("comparability", payload)
         self.assertIn("gate_status", payload)
         self.assertIn("repeat_stats", payload)
+        self.assertEqual(payload["execution"]["stdout_excerpt"], "ok")
+        self.assertEqual(payload["execution"]["stderr_excerpt"], "warn")
+        self.assertEqual(payload["execution"]["file_artifacts"]["result.txt"], "15")
+        self.assertEqual(payload["performance"]["overall_v2_run_mean"], 0.75)
+        self.assertEqual(payload["performance"]["overall_v2_aggregated_score"], 0.8)
 
     async def test_generated_report_uses_none_placeholder_for_empty_improvements(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1378,9 +1446,13 @@ FINAL_OUTPUT_VERIFIED=true
             ]
             for run_id in run_ids:
                 result_path = Path(tmp) / f"mini_agent_case_{run_id}.json"
+                result_png_path = Path(tmp) / f"mini_agent_case_{run_id}.png"
                 report_path = Path(tmp) / f"mini_agent_clear_report_{run_id}.md"
+                manifest_png_path = Path(tmp) / f"mini_agent_run_manifest_{run_id}.png"
                 result_path.write_text(run_id, encoding="utf-8")
+                result_png_path.write_text(f"{run_id}-png", encoding="utf-8")
                 report_path.write_text(run_id, encoding="utf-8")
+                manifest_png_path.write_text(f"{run_id}-manifest-png", encoding="utf-8")
                 manifest_path = evaluator._run_manifest_path(run_id)
                 manifest_path.write_text(
                     json.dumps(
@@ -1409,8 +1481,73 @@ FINAL_OUTPUT_VERIFIED=true
                 ],
             )
             self.assertFalse((Path(tmp) / "mini_agent_case_20260309_120000.json").exists())
+            self.assertFalse((Path(tmp) / "mini_agent_case_20260309_120000.png").exists())
             self.assertFalse((Path(tmp) / "mini_agent_clear_report_20260309_120000.md").exists())
+            self.assertFalse((Path(tmp) / "mini_agent_run_manifest_20260309_120000.png").exists())
             self.assertTrue((Path(tmp) / "mini_agent_case_20260309_150000.json").exists())
+            self.assertTrue((Path(tmp) / "mini_agent_case_20260309_150000.png").exists())
+            self.assertTrue((Path(tmp) / "mini_agent_run_manifest_20260309_150000.png").exists())
+
+    def test_cleanup_old_run_artifacts_removes_orphaned_files_older_than_retained_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={
+                    "artifact_retention": {
+                        "enabled": True,
+                        "keep_latest_runs": 1,
+                    }
+                },
+            )
+
+            retained_result = Path(tmp) / "mini_agent_case_20260310_010000.json"
+            retained_report = Path(tmp) / "mini_agent_clear_report_20260310_010000.md"
+            retained_result.write_text("new", encoding="utf-8")
+            retained_report.write_text("new", encoding="utf-8")
+            retained_manifest = evaluator._run_manifest_path("20260310_010000")
+            retained_manifest.write_text(
+                json.dumps(
+                    {
+                        "run_id": "20260310_010000",
+                        "artifacts": [
+                            retained_result.name,
+                            retained_report.name,
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            orphan_old = Path(tmp) / "mini_agent_python_coding_task_1773000000.json"
+            orphan_old_png = Path(tmp) / "mini_agent_python_coding_task_1773000000.png"
+            orphan_old.write_text("old", encoding="utf-8")
+            orphan_old_png.write_text("old-png", encoding="utf-8")
+            orphan_manifest_png = Path(tmp) / "mini_agent_run_manifest_20260309_230000.png"
+            orphan_manifest_png.write_text("old-manifest-png", encoding="utf-8")
+            orphan_new = Path(tmp) / "mini_agent_python_coding_task_1773999999.json"
+            orphan_new_png = Path(tmp) / "mini_agent_python_coding_task_1773999999.png"
+            orphan_new.write_text("newer-than-manifest", encoding="utf-8")
+            orphan_new_png.write_text("newer-than-manifest-png", encoding="utf-8")
+
+            old_time = retained_manifest.stat().st_mtime - 100
+            new_time = retained_manifest.stat().st_mtime + 100
+            os.utime(orphan_old, (old_time, old_time))
+            os.utime(orphan_old_png, (old_time, old_time))
+            os.utime(orphan_manifest_png, (old_time, old_time))
+            os.utime(orphan_new, (new_time, new_time))
+            os.utime(orphan_new_png, (new_time, new_time))
+
+            evaluator._cleanup_old_run_artifacts()
+
+            self.assertFalse(orphan_old.exists())
+            self.assertFalse(orphan_old_png.exists())
+            self.assertFalse(orphan_manifest_png.exists())
+            self.assertTrue(orphan_new.exists())
+            self.assertTrue(orphan_new_png.exists())
+            self.assertTrue(retained_result.exists())
+            self.assertTrue(retained_report.exists())
+            self.assertTrue(retained_manifest.exists())
 
     def test_config_can_disable_runtime_extension_suite(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1688,6 +1825,102 @@ FINAL_OUTPUT_VERIFIED=true
         self.assertFalse(
             any("HARD_NON_COMPARABLE" in rec for rec in aggregated.recommendations),
             "Aggregated recommendations should be rebuilt from aggregated comparability, not stale run-level status.",
+        )
+
+    def test_aggregation_preserves_checker_and_run_audit_summaries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={"runs_per_task": 2},
+            )
+
+            test_case = AgentTestCase(
+                name="case",
+                category="analysis",
+                description="d",
+                task_prompt="p",
+                evaluation_criteria=AgentTestCriteria(),
+                core_comparable=True,
+            )
+            details = {
+                "outcome": {"score": 0.9, "supported": True, "observed": True},
+                "safety": {"score": 0.9, "supported": True, "observed": True},
+                "robustness": {"score": 0.9, "supported": True, "observed": True},
+                "basic_efficiency": {"score": 0.9, "supported": True, "observed": True},
+            }
+            comparable = {
+                "status": "COMPARABLE",
+                "core_status": "COMPARABLE",
+                "full_status": "COMPARABLE",
+                "reasons": [],
+                "core_reasons": [],
+                "full_reasons": [],
+                "required_signal_status": {
+                    "checker_executed": True,
+                    "repeated_runs": True,
+                    "wall_clock_time": True,
+                },
+            }
+            run_a = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.0, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.9, confidence=0.9, passed=True),
+                agent_output="alpha",
+                file_artifacts={"result.txt": "15"},
+                overall_clear_score=0.9,
+                overall_v2_score=0.9,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                v2_dimension_details=details,
+                evidence_quality={
+                    "checker_executed": True,
+                    "checker_passed": True,
+                    "checker_subchecks": {"file_artifact:result.txt": True},
+                    "high_supervision_coverage": 1.0,
+                },
+                comparability=comparable,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+            )
+            run_b = AgentEvaluationResult(
+                test_case=test_case,
+                clear_metrics=AgentCLEARMetrics(total_task_time=2.5, execution_success_rate=1.0),
+                evaluation_result=EvaluationResult(overall_score=0.88, confidence=0.9, passed=True),
+                agent_output="beta",
+                file_artifacts={"result.txt": "15"},
+                overall_clear_score=0.88,
+                overall_v2_score=0.88,
+                passed_all_thresholds=True,
+                confidence_score=0.9,
+                v2_dimension_details=details,
+                evidence_quality={
+                    "checker_executed": True,
+                    "checker_passed": False,
+                    "checker_subchecks": {"file_artifact:result.txt": False},
+                    "high_supervision_coverage": 1.0,
+                },
+                comparability=comparable,
+                gate_status={
+                    "safety_gate": {"status": "pass"},
+                    "critical_function_gate": {"status": "pass"},
+                    "oracle_gate": {"status": "pass"},
+                },
+            )
+
+            aggregated = evaluator._aggregate_repeated_results(test_case, [run_a, run_b])
+
+        self.assertEqual(aggregated.repeat_stats["run_checker_passed"], [True, False])
+        self.assertEqual(
+            aggregated.repeat_stats["run_file_artifact_names"],
+            [["result.txt"], ["result.txt"]],
+        )
+        self.assertEqual(
+            aggregated.evidence_quality["checker_subchecks_summary"]["file_artifact:result.txt"]["pass_count"],
+            1,
         )
 
     def test_aggregation_accepts_exact_two_thirds_pass_rate(self):
@@ -2120,6 +2353,82 @@ class AgentV2FairnessTests(unittest.TestCase):
         self.assertFalse(scored["evidence_quality"]["checker_executed"])
         self.assertIsNone(scored["dimension_details"]["outcome"]["score"])
         self.assertEqual(scored["comparability"]["status"], "HARD_NON_COMPARABLE")
+
+    def test_unsupported_behavior_checks_do_not_reduce_high_supervision_coverage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evaluator = AgentCLEAREvaluator(
+                results_dir=tmp,
+                runtime_path="mini-agent",
+                evaluation_settings={
+                    "runs_per_task": 3,
+                    "resolved_capabilities": {
+                        "structured_trace": True,
+                        "tool_trace": True,
+                        "step_trace": True,
+                        "timeline_events": True,
+                        "session_stats": False,
+                        "provider_cost": False,
+                        "token_usage": False,
+                        "checker_support": {
+                            "file_artifacts": True,
+                            "stdout_capture": True,
+                            "exit_code": True,
+                            "behavior_validation": False,
+                        },
+                    },
+                },
+            )
+
+        case = AgentTestCase(
+            name="error_handling_test",
+            category="reasoning",
+            description="d",
+            task_prompt="p",
+            expected_outputs=["syntax error", "fixed", "summarize"],
+            expected_file_changes=["nonexistent.txt"],
+            success_indicators=[
+                "intentional_error_triggered=true",
+                "error_detected=true",
+                "fix_applied=true",
+                "rerun_succeeded=true",
+                "final_output_verified=true",
+            ],
+            evaluation_criteria=AgentTestCriteria(
+                task_type="reasoning",
+                expected_tools=["read_file", "write_file", "bash"],
+            ),
+        )
+        metrics = self._base_metrics()
+        metrics.supports_structured_trace = True
+        metrics.trace_signal_quality = 1.0
+        metrics.steps_to_completion = 5
+        metrics.tool_selection_accuracy = 1.0
+        metrics.task_efficiency_score = 0.9
+        scored = evaluator._compute_v2_scoring(
+            test_case=case,
+            stdout="[FILE_CONTENT:nonexistent.txt]\ncreated\n[/FILE_CONTENT]",
+            stderr="syntax error fixed summarize",
+            clear_metrics=metrics,
+            evaluation_result=EvaluationResult(overall_score=1.0, correctness_score=1.0),
+            log_analysis={
+                **self._base_log(),
+                "total_steps": 5,
+                "tool_call_count": 3,
+                "tools_used": ["read_file", "write_file", "bash"],
+                "has_structured_trace": True,
+                "detailed_timeline": [
+                    {"event_type": "tool_call", "tool_name": "read_file"},
+                    {"event_type": "tool_call", "tool_name": "write_file"},
+                    {"event_type": "tool_call", "tool_name": "bash"},
+                ],
+            },
+            run_scores=[1.0, 1.0, 1.0],
+            run_successes=[1.0, 1.0, 1.0],
+        )
+
+        self.assertAlmostEqual(scored["evidence_quality"]["high_supervision_coverage"], 1.0)
+        self.assertFalse(scored["is_provisional"])
+        self.assertEqual(scored["comparability"]["status"], "COMPARABLE")
 
 
 if __name__ == "__main__":

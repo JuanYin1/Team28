@@ -86,6 +86,50 @@ class _TraceOnlyProbeAdapter:
         )
 
 
+class _StructuredTimelineProbeAdapter:
+    agent_id = "probe-agent"
+    process_name_hint = "probe-agent"
+
+    def run(self, request, on_process_start=None):
+        if on_process_start:
+            on_process_start(9999)
+        return AgentExecutionResult(
+            command=["fake-agent"],
+            stdout="ok",
+            stderr="",
+            success=True,
+            execution_time_seconds=0.01,
+            return_code=0,
+            pid=9999,
+            metadata={
+                "structured_timeline": [
+                    {"event_type": "thinking", "step": 1, "content": "planning"},
+                    {"event_type": "tool_call", "step": 1, "tool_name": "bash"},
+                    {"event_type": "tool_result", "step": 1, "tool_name": "bash", "content": "ok"},
+                    {"event_type": "assistant_response", "step": 1, "content": "done"},
+                ]
+            },
+        )
+
+
+class _FailedProbeAdapter:
+    agent_id = "probe-agent"
+    process_name_hint = "probe-agent"
+
+    def run(self, request, on_process_start=None):
+        if on_process_start:
+            on_process_start(9999)
+        return AgentExecutionResult(
+            command=["fake-agent"],
+            stdout="Step 1: plan only, no action taken",
+            stderr="tool schema validation failed",
+            success=False,
+            execution_time_seconds=0.01,
+            return_code=1,
+            pid=9999,
+        )
+
+
 class CapabilityProbeTests(unittest.TestCase):
     def test_probe_generates_profile_and_resolved_capabilities(self):
         declared = {
@@ -167,6 +211,48 @@ class CapabilityProbeTests(unittest.TestCase):
         self.assertTrue(profile["probed_capabilities"]["step_trace"])
         self.assertTrue(profile["probed_capabilities"]["structured_trace"])
         self.assertTrue(profile["resolved_capabilities"]["timeline_events"])
+
+    def test_probe_reads_structured_timeline_from_adapter_metadata(self):
+        declared = {
+            "structured_trace": True,
+            "tool_trace": True,
+            "step_trace": True,
+            "timeline_events": True,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = run_capability_probe(
+                adapter=_StructuredTimelineProbeAdapter(),
+                agent_id="probe-agent-structured",
+                declared_capabilities=declared,
+                profile_dir=str(Path(tmp) / "profiles"),
+                timeout_seconds=5.0,
+            )
+
+        self.assertTrue(profile["probed_capabilities"]["tool_trace"])
+        self.assertTrue(profile["probed_capabilities"]["step_trace"])
+        self.assertTrue(profile["probed_capabilities"]["structured_trace"])
+        self.assertTrue(profile["probed_capabilities"]["timeline_events"])
+
+    def test_failed_probe_runs_do_not_upgrade_capabilities(self):
+        declared = {
+            "structured_trace": True,
+            "tool_trace": True,
+            "step_trace": True,
+            "timeline_events": True,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = run_capability_probe(
+                adapter=_FailedProbeAdapter(),
+                agent_id="probe-agent-failed",
+                declared_capabilities=declared,
+                profile_dir=str(Path(tmp) / "profiles"),
+                timeout_seconds=5.0,
+            )
+
+        self.assertFalse(profile["probed_capabilities"]["tool_trace"])
+        self.assertFalse(profile["probed_capabilities"]["step_trace"])
+        self.assertFalse(profile["probed_capabilities"]["structured_trace"])
+        self.assertFalse(profile["probed_capabilities"]["timeline_events"])
 
 
 if __name__ == "__main__":

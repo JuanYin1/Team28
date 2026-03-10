@@ -191,6 +191,7 @@ class AgentEvaluationResult:
     agent_output: str = ""
     agent_error_output: str = ""
     execution_logs: str = ""
+    file_artifacts: Dict[str, str] = field(default_factory=dict)
     
     # Analysis
     tools_used: List[str] = field(default_factory=list)
@@ -1293,6 +1294,8 @@ Please show me the complete process including testing.""",
                         f"{stdout}\n[TRACE_LOG:{path_label}]\n{text}\n[/TRACE_LOG]"
                     )
                 
+                file_artifacts: Dict[str, str] = {}
+
                 # Check for expected file changes in workspace
                 for expected_file in test_case.expected_file_changes:
                     file_path = Path(temp_workspace) / expected_file
@@ -1300,10 +1303,13 @@ Please show me the complete process including testing.""",
                         # Read file content for analysis
                         try:
                             content = file_path.read_text()
+                            file_artifacts[expected_file] = content
                             # Append file content to stdout for analysis
                             stdout = (stdout or "") + f"\n[FILE_CONTENT:{expected_file}]\n{content}\n[/FILE_CONTENT]"
                         except:
                             pass
+
+                self._last_execution_metadata["file_artifacts"] = file_artifacts
                 
                 return stdout or "", stderr or "", success, execution_time
                 
@@ -1656,6 +1662,7 @@ Please show me the complete process including testing.""",
                 agent_output=stdout,
                 agent_error_output=stderr,
                 execution_logs=stdout + "\n--- STDERR ---\n" + stderr,
+                file_artifacts=dict(self._last_execution_metadata.get("file_artifacts", {}) or {}),
                 tools_used=list(dict.fromkeys(log_analysis["tools_used"])),
                 step_breakdown=log_analysis["step_breakdown"],
                 overall_clear_score=v2_scoring["overall_v2_score"],
@@ -1680,9 +1687,14 @@ Please show me the complete process including testing.""",
                     "run_count": 1,
                     "pass_rate": 1.0 if passed_thresholds else 0.0,
                     "overall_v2_mean": v2_scoring["overall_v2_score"],
+                    "overall_v2_aggregated_score": v2_scoring["overall_v2_score"],
                     "overall_v2_diagnostic_mean": v2_scoring["overall_v2_diagnostic_score"],
                     "overall_v2_std": 0.0,
                     "overall_v2_ci95": 0.0,
+                    "run_checker_passed": [bool(v2_scoring["evidence_quality"].get("checker_passed", False))],
+                    "run_checker_subchecks": [dict(v2_scoring["evidence_quality"].get("checker_subchecks", {}) or {})],
+                    "run_output_lengths": [len(stdout or "")],
+                    "run_file_artifact_names": [sorted((self._last_execution_metadata.get("file_artifacts", {}) or {}).keys())],
                 },
             )
             
@@ -1822,6 +1834,15 @@ Please show me the complete process including testing.""",
         return max(0.0, min(1.0, float(value)))
 
     @staticmethod
+    def _excerpt_text(text: str, limit: int = 12000) -> str:
+        content = str(text or "")
+        max_chars = max(256, int(limit))
+        if len(content) <= max_chars:
+            return content
+        omitted = len(content) - max_chars
+        return f"{content[:max_chars]}\n...[truncated {omitted} chars]"
+
+    @staticmethod
     def _ratio_to_score(actual: float, baseline: float) -> float:
         """
         Convert "lower-is-better" ratio into [0,1] score.
@@ -1938,16 +1959,15 @@ Please show me the complete process including testing.""",
         kv_pairs = self._extract_line_kv_pairs(text)
 
         expected_files = test_case.expected_file_changes or []
-        if expected_files:
+        if expected_files and self._checker_support_enabled("file_artifacts"):
             for expected_file in expected_files:
                 mandatory_check_ids.append(f"file_artifact:{expected_file}")
-            if self._checker_support_enabled("file_artifacts"):
-                for expected_file in expected_files:
-                    marker = f"[FILE_CONTENT:{expected_file}]"
-                    checks[f"file_artifact:{expected_file}"] = marker in stdout
+            for expected_file in expected_files:
+                marker = f"[FILE_CONTENT:{expected_file}]"
+                checks[f"file_artifact:{expected_file}"] = marker in stdout
 
-        mandatory_check_ids.append("exit_code_success")
         if self._checker_support_enabled("exit_code"):
+            mandatory_check_ids.append("exit_code_success")
             checks["exit_code_success"] = clear_metrics.execution_success_rate >= 1.0
 
         expected_outputs = test_case.expected_outputs or []
@@ -1981,9 +2001,8 @@ Please show me the complete process including testing.""",
             ]
         elif test_case.success_indicators:
             mandatory_behavior_checks = ["behavior_indicators_match"]
-        mandatory_check_ids.extend(mandatory_behavior_checks)
-
         if self._checker_support_enabled("behavior_validation"):
+            mandatory_check_ids.extend(mandatory_behavior_checks)
             if test_case.name == "data_analysis_task":
                 behavior_checks = {
                     "summary_total_sales": self._kv_matches_expected(
@@ -2992,12 +3011,15 @@ Please show me the complete process including testing.""",
             abs_ts = task_start_time + time_offset
 
             memory_mb, cpu_pct = resource_monitor.get_resource_at(abs_ts)
+            event_type = event["event_type"]
+            if event_type == "tool_result":
+                event_type = "success"
 
             profiles.append({
                 "step": event.get("step"),
-                "event_type": event["event_type"],
+                "event_type": event_type,
                 "time_offset_s": round(time_offset, 2),
-                "cpu_percent": round(cpu_pct, 1),
+                "cpu_percent": round(cpu_pct, 3),
                 "memory_mb": round(memory_mb, 1),
             })
 
@@ -3022,6 +3044,19 @@ Please show me the complete process including testing.""",
 
         v2_scores = [r.overall_v2_score or r.overall_clear_score for r in run_results]
         diag_scores = [r.overall_v2_diagnostic_score for r in run_results]
+        run_checker_passed = [
+            bool(r.evidence_quality.get("checker_passed", False))
+            for r in run_results
+        ]
+        run_checker_subchecks = [
+            dict(r.evidence_quality.get("checker_subchecks", {}) or {})
+            for r in run_results
+        ]
+        run_output_lengths = [len(r.agent_output or "") for r in run_results]
+        run_file_artifact_names = [
+            sorted((r.file_artifacts or {}).keys())
+            for r in run_results
+        ]
         mean_v2 = statistics.fmean(v2_scores)
         std_v2 = statistics.pstdev(v2_scores) if run_count > 1 else 0.0
         ci95_v2 = 1.96 * std_v2 / (run_count ** 0.5) if run_count > 1 else 0.0
@@ -3264,6 +3299,26 @@ Please show me the complete process including testing.""",
             "aggregated_over_runs": run_count,
         }
 
+        checker_subcheck_keys = sorted(
+            {
+                key
+                for subchecks in run_checker_subchecks
+                for key in subchecks.keys()
+            }
+        )
+        if checker_subcheck_keys:
+            primary.evidence_quality["checker_subchecks_summary"] = {
+                key: {
+                    "pass_count": sum(
+                        1
+                        for subchecks in run_checker_subchecks
+                        if bool(subchecks.get(key, False))
+                    ),
+                    "run_count": run_count,
+                }
+                for key in checker_subcheck_keys
+            }
+
         primary.v2_dimension_details = aggregated_details
         primary.v2_dimension_scores = main_scores
         primary.v2_diagnostic_dimension_scores = diagnostic_scores_map
@@ -3286,6 +3341,7 @@ Please show me the complete process including testing.""",
             "run_count": run_count,
             "pass_rate": pass_rate,
             "overall_v2_mean": mean_v2,
+            "overall_v2_aggregated_score": primary.overall_v2_score,
             "overall_v2_std": std_v2,
             "overall_v2_ci95": ci95_v2,
             "overall_v2_diagnostic_mean": mean_diag,
@@ -3293,6 +3349,10 @@ Please show me the complete process including testing.""",
             "overall_v2_diagnostic_ci95": ci95_diag,
             "run_scores": v2_scores,
             "run_diagnostic_scores": diag_scores,
+            "run_checker_passed": run_checker_passed,
+            "run_checker_subchecks": run_checker_subchecks,
+            "run_output_lengths": run_output_lengths,
+            "run_file_artifact_names": run_file_artifact_names,
         }
 
         primary.confidence_score = float(statistics.fmean(eval_conf)) if eval_conf else primary.confidence_score
@@ -3311,6 +3371,7 @@ Please show me the complete process including testing.""",
                 if tool not in dedup_tools:
                     dedup_tools.append(tool)
         primary.tools_used = dedup_tools
+        primary.file_artifacts = dict(primary.file_artifacts or {})
 
         primary.recommendations = self._augment_v2_recommendations(
             base_recommendations=self._generate_recommendations(
@@ -3427,11 +3488,23 @@ Please show me the complete process including testing.""",
                 "tools_used": result.tools_used,
                 "steps_taken": result.clear_metrics.steps_to_completion,
                 "success": result.clear_metrics.execution_success_rate,
-                "output_length": len(result.agent_output)
+                "output_length": len(result.agent_output),
+                "stdout_excerpt": self._excerpt_text(result.agent_output),
+                "stderr_excerpt": self._excerpt_text(result.agent_error_output),
+                "log_excerpt": self._excerpt_text(result.execution_logs),
+                "file_artifacts": {
+                    path: self._excerpt_text(content, limit=4000)
+                    for path, content in (result.file_artifacts or {}).items()
+                },
             },
             "performance": {
                 "overall_clear_score": result.overall_clear_score,
                 "overall_v2_score": result.overall_v2_score,
+                "overall_v2_run_mean": result.repeat_stats.get("overall_v2_mean", result.overall_v2_score),
+                "overall_v2_aggregated_score": result.repeat_stats.get(
+                    "overall_v2_aggregated_score",
+                    result.overall_v2_score,
+                ),
                 "overall_v2_diagnostic_score": result.overall_v2_diagnostic_score,
                 "passed_thresholds": result.passed_all_thresholds,
                 "dimension_scores": result.dimension_scores,
@@ -3491,6 +3564,10 @@ Please show me the complete process including testing.""",
         passed_tests = sum(1 for r in results if r.passed_all_thresholds)
         avg_clear_score = sum(r.overall_clear_score for r in results) / total_tests
         avg_main_v2_score = sum(r.overall_v2_score for r in results) / total_tests
+        avg_main_v2_run_mean = sum(
+            float(r.repeat_stats.get("overall_v2_mean", r.overall_v2_score))
+            for r in results
+        ) / total_tests
         avg_diag_v2_score = sum(r.overall_v2_diagnostic_score for r in results) / total_tests
         avg_score_coverage = sum(r.score_coverage for r in results) / total_tests
         avg_cost = sum(r.clear_metrics.estimated_cost_usd for r in results) / total_tests
@@ -3560,6 +3637,7 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 | **Success Rate** | {passed_tests}/{total_tests} ({passed_tests/total_tests*100:.1f}%) | Overall task completion |
 | **Average CLEAR Score** | {avg_clear_score:.3f}/1.000 | Main comparable score alias |
 | **Average V2 Main Score** | {avg_main_v2_score:.3f}/1.000 | Comparable dimensions only |
+| **Average V2 Run Mean** | {avg_main_v2_run_mean:.3f}/1.000 | Mean of per-run main scores |
 | **Average V2 Diagnostic Score** | {avg_diag_v2_score:.3f}/1.000 | Diagnostic dimensions only |
 | **Average Score Coverage** | {avg_score_coverage:.3f} | Main-dimension observability coverage |
 | **Average Cost per Task** | ${avg_cost:.3f} USD | Economic efficiency |
@@ -3604,8 +3682,8 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
 
 ## 📋 Detailed Test Results
 
-| Test Case | Category | Main V2 | Diag V2 | Coverage | Cost | Time | Steps | Core Cmp | Full Cmp | Provisional | Status |
-|-----------|----------|---------|---------|----------|------|------|-------|----------|----------|-------------|--------|
+| Test Case | Category | Main V2 | Run Mean | Diag V2 | Coverage | Cost | Time | Steps | Core Cmp | Full Cmp | Provisional | Status |
+|-----------|----------|---------|----------|---------|----------|------|------|-------|----------|----------|-------------|--------|
 """
         
         for result in results:
@@ -3615,7 +3693,8 @@ This report presents comprehensive evaluation results for the `{self._agent_labe
             provisional = "yes" if result.is_provisional else "no"
             report += (
                 f"| {result.test_case.name} | {result.test_case.category} "
-                f"| {result.overall_v2_score:.3f} | {result.overall_v2_diagnostic_score:.3f} "
+                f"| {result.overall_v2_score:.3f} | {float(result.repeat_stats.get('overall_v2_mean', result.overall_v2_score)):.3f} "
+                f"| {result.overall_v2_diagnostic_score:.3f} "
                 f"| {result.score_coverage:.2f} "
                 f"| ${result.clear_metrics.estimated_cost_usd:.3f} | {result.clear_metrics.total_task_time:.1f}s "
                 f"| {result.clear_metrics.steps_to_completion} | {core_cmp} | {full_cmp} | {provisional} | {status} |\n"
@@ -3816,12 +3895,20 @@ position in the log against wall-clock timestamps captured by the resource monit
         full_leaderboard_path = self.results_dir / f"{self._artifact_prefix()}_leaderboard_full_{timestamp}.csv"
         with open(core_leaderboard_path, "w", newline="", encoding="utf-8") as core_file:
             writer = csv.writer(core_file)
-            writer.writerow(["test_case", "main_v2_score", "core_status", "eligible_for_main_leaderboard", "is_provisional"])
+            writer.writerow([
+                "test_case",
+                "main_v2_score",
+                "main_v2_run_mean",
+                "core_status",
+                "eligible_for_main_leaderboard",
+                "is_provisional",
+            ])
             for result in results:
                 writer.writerow(
                     [
                         result.test_case.name,
                         f"{result.overall_v2_score:.6f}",
+                        f"{float(result.repeat_stats.get('overall_v2_mean', result.overall_v2_score)):.6f}",
                         result.comparability.get("core_status", result.comparability.get("status", "UNKNOWN")),
                         bool(result.comparability.get("eligible_for_main_leaderboard", False)),
                         bool(result.is_provisional),
@@ -3887,12 +3974,27 @@ position in the log against wall-clock timestamps captured by the resource monit
         if not self.run_retention_enabled:
             return
 
+        results_dir_resolved = self.results_dir.resolve()
+
+        def safe_unlink(path: Path) -> None:
+            try:
+                path.relative_to(results_dir_resolved)
+            except ValueError:
+                return
+            path.unlink(missing_ok=True)
+
+        def remove_visualization_sibling(path: Path) -> None:
+            if path.suffix.lower() != ".json":
+                return
+            safe_unlink(path.with_suffix(".png"))
+
         manifest_pattern = f"{self._artifact_prefix()}_run_manifest_*.json"
         manifests = sorted(
             self.results_dir.glob(manifest_pattern),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
+        retained_manifests = manifests[: self.keep_latest_runs]
         stale_manifests = manifests[self.keep_latest_runs:]
         for manifest_path in stale_manifests:
             try:
@@ -3904,12 +4006,54 @@ position in the log against wall-clock timestamps captured by the resource monit
                 for relative_path in artifacts:
                     artifact_path = (self.results_dir / str(relative_path)).resolve()
                     try:
-                        artifact_path.relative_to(self.results_dir.resolve())
+                        artifact_path.relative_to(results_dir_resolved)
                     except ValueError:
                         continue
-                    if artifact_path.exists():
-                        artifact_path.unlink()
-            manifest_path.unlink(missing_ok=True)
+                    remove_visualization_sibling(artifact_path)
+                    safe_unlink(artifact_path)
+            remove_visualization_sibling(manifest_path.resolve())
+            safe_unlink(manifest_path.resolve())
+
+        if not retained_manifests:
+            return
+
+        retained_paths: Set[Path] = set()
+        for manifest_path in retained_manifests:
+            retained_paths.add(manifest_path.resolve())
+            try:
+                payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = {}
+            artifacts = payload.get("artifacts", []) if isinstance(payload, dict) else []
+            if not isinstance(artifacts, list):
+                continue
+            for relative_path in artifacts:
+                artifact_path = (self.results_dir / str(relative_path)).resolve()
+                try:
+                    artifact_path.relative_to(self.results_dir.resolve())
+                except ValueError:
+                    continue
+                retained_paths.add(artifact_path)
+
+        cutoff_mtime = min(path.stat().st_mtime for path in retained_manifests)
+        orphan_pattern = f"{self._artifact_prefix()}_*"
+        for candidate in self.results_dir.glob(orphan_pattern):
+            if candidate.is_dir():
+                continue
+            candidate_resolved = candidate.resolve()
+            if candidate_resolved in retained_paths:
+                continue
+            if (
+                candidate.name.startswith(f"{self._artifact_prefix()}_run_manifest_")
+                and candidate.suffix.lower() == ".json"
+            ):
+                continue
+            try:
+                if candidate.stat().st_mtime < cutoff_mtime:
+                    remove_visualization_sibling(candidate_resolved)
+                    safe_unlink(candidate_resolved)
+            except FileNotFoundError:
+                continue
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run phase3 CLEAR evaluation.")
