@@ -5,10 +5,16 @@ evaluation:
     scoring_version: v2
     runs_per_task: 3
     include_runtime_extension_suite: false
+    artifact_retention:
+      enabled: false
+      keep_latest_runs: 3
+    # If high-supervision evidence coverage is below this threshold, run is marked provisional.
     minimum_high_supervision_coverage: 0.40
+    # true: main leaderboard only uses core suite tasks (keeps cross-agent comparison strict).
     main_leaderboard_core_suite_only: true
   v2:
     evidence_quality:
+      # Keep evidence-quality as metadata by default; do not inject into total score.
       include_in_total_score: false
       provisional_if_below_high_supervision_coverage: 0.40
     comparable_dimensions:
@@ -43,6 +49,7 @@ evaluation:
       token_efficiency: 0.15
       trace_quality: 0.10
     full_comparability:
+      # Full comparability requires BOTH capability support and observed runtime signals.
       required_signals:
         - structured_trace
         - tool_trace
@@ -55,10 +62,14 @@ evaluation:
     comparability:
       hard_requirements:
         checker_must_run: true
+      # 1.0 means all configured comparable dimensions must be observed.
       minimum_score_coverage_for_comparable: 1.0
     capability_probe:
+      # Automatic probe on phase3 startup. Manual flags always override this.
       enabled: false
+      # true: always refresh profile even if profile file already exists.
       auto_refresh: false
+      # Probe profile output directory (resolved relative to repo config path).
       profile_dir: artifacts/capability_profiles
     normalization:
       mode: task_family_baseline
@@ -89,6 +100,7 @@ evaluation:
           steps: 10
           memory_mb: 384
     gate_caps:
+      # Score caps when hard gates fail (safety / critical function / oracle).
       safety: 0.20
       critical: 0.45
       oracle: 0.60
@@ -111,12 +123,13 @@ agents:
       conda_env:
       extra_args: []
     evaluation_capabilities:
+      # provider_cost=true only when runtime reports provider-side cost directly (not estimated from tokens).
       structured_trace: true
       tool_trace: true
       step_trace: true
       timeline_events: true
       session_stats: true
-      provider_cost: true
+      provider_cost: false
       token_usage: true
       skills_runtime: true
       checker_support:
@@ -160,9 +173,12 @@ agents:
         results_dir: artifacts/continue/phase3/single_test
     adapter:
       type: continue-cn
+      # pty keeps richer CLI output for parsers on some runtimes.
       transport: pty
+      # Supplemental trace files merged into parser input.
       trace_log_paths:
         - ~/.continue/logs/cn.log
+      # Tail window for supplemental trace files.
       trace_log_tail_lines: 1200
       executable:
       agent_name:
@@ -176,10 +192,11 @@ agents:
         - zhiruis-workspace-2
         - --auto
     evaluation_capabilities:
-      structured_trace: false
-      tool_trace: false
-      step_trace: false
-      timeline_events: false
+      # Continue can be full-comparable only if probe confirms these trace signals.
+      structured_trace: true
+      tool_trace: true
+      step_trace: true
+      timeline_events: true
       session_stats: false
       provider_cost: false
       token_usage: false
@@ -194,6 +211,7 @@ agents:
         - "\"toolName\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
         - "\"function\"\\s*:\\s*\\{\\s*\"name\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
         - "(?i)tool\\s*call\\s*[:：]\\s*([a-zA-Z_][a-zA-Z0-9_\\-]*)"
+        - "^[\\s>*-]*[○●]\\s*([A-Za-z_][A-Za-z0-9_]*)\\("
       step_patterns:
         - "(?:\\bStep\\s+(\\d+)\\b|\"step\"\\s*:\\s*(\\d+)|^\\s*(\\d+)\\.)"
       thinking_patterns:
@@ -215,6 +233,8 @@ agents:
         Bash: bash
         MultiEdit: edit_file
         Edit: edit_file
+      # false: unknown/new runtime tools are kept as observed evidence instead of being dropped.
+      enforce_known_tools: false
 
   # Example: add a new agent with YAML only (no adapter/registry code changes).
   example-generic:
@@ -244,6 +264,7 @@ agents:
       cwd: "{workspace}"
       success_codes: [0]
     evaluation_capabilities:
+      # Start conservative; promote to true only after parser/probe evidence is stable.
       structured_trace: false
       tool_trace: false
       step_trace: false
