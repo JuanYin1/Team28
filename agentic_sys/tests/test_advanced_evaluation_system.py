@@ -40,6 +40,27 @@ class AdvancedEvaluatorScoringTests(unittest.TestCase):
         self.assertLessEqual(result.overall_score, 1.0)
         self.assertAlmostEqual(result.overall_score, 1.0, places=6)
 
+    def test_execution_success_is_not_unfairly_penalized_when_error_is_resolved(self):
+        evaluator = AdvancedEvaluator(use_llm_judge=False)
+        criteria = EvaluationCriteria()
+        response = (
+            "There was an error initially, but after fixing the config it now works "
+            "and completed successfully with the expected result."
+        )
+
+        score = evaluator._evaluate_execution_success(response, workspace_path=None, criteria=criteria)
+
+        self.assertGreaterEqual(score, 0.8)
+
+    def test_execution_success_penalizes_unresolved_failure_signals(self):
+        evaluator = AdvancedEvaluator(use_llm_judge=False)
+        criteria = EvaluationCriteria()
+        response = "Traceback (most recent call last): ... execution failed to complete."
+
+        score = evaluator._evaluate_execution_success(response, workspace_path=None, criteria=criteria)
+
+        self.assertLessEqual(score, 0.4)
+
 
 if __name__ == "__main__":
     unittest.main()

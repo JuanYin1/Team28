@@ -1,0 +1,750 @@
+{
+  "schema_version": "phase3.v3",
+  "test_case": {
+    "name": "error_handling_test",
+    "category": "reasoning",
+    "description": "Test agent's ability to handle errors and adapt",
+    "task_prompt": "I need you to help me with a task that might have some issues:\n\n1. Try to read a file called 'nonexistent.txt' \n2. When that fails (as it should), create the file with some sample content\n3. Read the file you just created to confirm it works\n4. Try to run a Python command that has a syntax error: 'python -c \"print(hello world\"'\n5. Fix the syntax error and run the corrected command\n6. Summarize what went wrong and how you fixed the issues\n7. End your final response with this exact checklist:\n   INTENTIONAL_ERROR_TRIGGERED=true\n   ERROR_DETECTED=true\n   FIX_APPLIED=true\n   RERUN_SUCCEEDED=true\n   FINAL_OUTPUT_VERIFIED=true",
+    "core_comparable": true
+  },
+  "clear_metrics": {
+    "llm_api_calls": 6,
+    "total_tokens_used": 13513,
+    "tool_executions": 5,
+    "skill_activations": 0,
+    "estimated_cost_usd": 0.03269866666666666,
+    "cost_is_estimated": true,
+    "context_window_usage": 0.0,
+    "total_task_time": 16.204451322555542,
+    "agent_thinking_time": 0.0,
+    "tool_execution_time": 8.95,
+    "llm_response_time": 0.0,
+    "steps_to_completion": 6,
+    "supports_structured_trace": true,
+    "trace_signal_quality": 1.0,
+    "time_breakdown_is_estimated": true,
+    "task_efficiency_score": 1.0,
+    "tool_selection_accuracy": 0.6666666666666666,
+    "context_utilization_ratio": 0.0,
+    "memory_usage_mb": 315.6575520833333,
+    "cpu_usage_percent": 0.5586917562724015,
+    "steps_per_second": 0.3501118741825681,
+    "task_completion_accuracy": 0.7380952380952381,
+    "output_quality_score": 0.8039021164021163,
+    "reasoning_coherence": 0.75,
+    "tool_usage_correctness": 0.8666666666666667,
+    "skills_effectiveness": 0.0,
+    "execution_success_rate": 1.0,
+    "error_recovery_effectiveness": 0.33968253968253964,
+    "response_consistency": 0.0,
+    "response_consistency_measured": false,
+    "system_stability": 0.0
+  },
+  "execution": {
+    "tools_used": [
+      "write_file",
+      "bash"
+    ],
+    "steps_taken": 6,
+    "success": 1.0,
+    "output_length": 305724,
+    "stdout_excerpt": "## Summary\n\n**Issues encountered and fixes applied:**\n\n1. **Nonexistent file read**: Attempted to read 'nonexistent.txt' which didn't exist - resulted in expected file not found error.\n2. **File creation**: Created the file with sample content successfully.\n3. **File verification**: Confirmed the created file was readable with correct content.\n4. **Python syntax error**: The command `python -c \"print(hello world\"` failed with a SyntaxError due to:\n   - Missing closing parenthesis\n   - Missing quotes around the string argument\n5. **Fix applied**: Corrected the command to `python -c \"print('hello world')\"` which properly:\n   - Wrapped the string in quotes\n   - Closed the parenthesis\n6. **Rerun succeeded**: The corrected command executed successfully and printed \"hello world\"\n\n**Final verification checklist:**\n\nINTENTIONAL_ERROR_TRIGGERED=true\nERROR_DETECTED=true\nFIX_APPLIED=true\nRERUN_SUCCEEDED=true\nFINAL_OUTPUT_VERIFIED=true\n\n[TRACE_LOG:/Users/Raymond/.continue/logs/cn.log]\n2026-03-10 00:27:22.270 [c70e31bf] [debug]: Received chunk {\"chunkCount\":8,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"File created:** `\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642246,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.271 [c70e31bf] [debug]: Received chunk {\"chunkCount\":9,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"fibonacci.py`\\n- **Main\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642247,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.731 [c70e31bf] [debug]: Received chunk {\"chunkCount\":10,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" function:** `calculate_fibonacci(n\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642448,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.732 [c70e31bf] [debug]: Received chunk {\"chunkCount\":11,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\")` -\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642449,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":12,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" efficiently\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":13,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" calculates the nth Fibonacci number using\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":14,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" an\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.734 [c70e31bf] [debug]: Received chunk {\"chunkCount\":15,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" iterative approach\\n- **Test\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":16,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" result\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":17,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\":** The \",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":18,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"10th Fibonacci number is **55\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642664,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.736 [c70e31bf] [debug]: Received chunk {\"chunkCount\":19,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"**\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642665,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.736 [c70e31bf] [debug]: Received chunk {\"chunkCount\":20,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" \u2713\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642667,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.738 [c70e31bf] [debug]: Received chunk {\"chunkCount\":21,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"\\n- **Verification:** The sequence\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642667,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":22,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" is\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642668,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":23,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" correct (\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642668,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":24,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"0, 1, 1,\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642669,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":25,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" 2, 3, 5\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642669,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.882 [c70e31bf] [debug]: Received chunk {\"chunkCount\":26,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\", 8, 13, \",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642869,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.885 [c70e31bf] [debug]: Received chunk {\"chunkCount\":27,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"21, 34,\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642870,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.888 [c70e31bf] [debug]: Received chunk {\"chunkCount\":28,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" 55)\\n\\nThe\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642871,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.890 [c70e31bf] [debug]: Received chunk {\"chunkCount\":29,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" script runs\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642872,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.891 [c70e31bf] [debug]: Received chunk {\"chunkCount\":30,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" without errors and correctly comp\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642872,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.892 [c70e31bf] [debug]: Received chunk {\"chunkCount\":31,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"utes\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642873,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.892 [c70e31bf] [debug]: Received chunk {\"chunkCount\":32,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" Fibonacci numbers.\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642874,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.893 [c70e31bf] [debug]: Received chunk {\"chunkCount\":33,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" The\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642874,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.128 [c70e31bf] [debug]: Received chunk {\"chunkCount\":34,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" implementation\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643109,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.129 [c70e31bf] [debug]: Received chunk {\"chunkCount\":35,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" uses\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643111,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.131 [c70e31bf] [debug]: Received chunk {\"chunkCount\":36,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" an efficient O\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643113,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.131 [c70e31bf] [debug]: Received chunk {\"chunkCount\":37,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"(n) time complexity algorithm that av\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643116,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.137 [c70e31bf] [debug]: Received chunk {\"chunkCount\":38,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"oids recurs\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643120,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.137 [c70e31bf] [debug]: Received chunk {\"chunkCount\":39,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"ion overhead\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643120,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.138 [c70e31bf] [debug]: Received chunk {\"chunkCount\":40,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\".\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643123,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.425 [c70e31bf] [debug]: Received chunk {\"chunkCount\":41,\"chunk\":{\"choices\":[],\"usage\":{\"completion_tokens\":157,\"prompt_tokens\":3770,\"total_tokens\":3927,\"prompt_tokens_details\":{\"cache_write_tokens\":0,\"cache_read_tokens\":0,\"cached_tokens\":0}},\"created\":1773127643140,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:25.122 [09c0d183] [debug]: Verbose logging enabled\n2026-03-10 00:27:25.124 [09c0d183] [debug]: Running in headless mode (TTY-less compatible)\n2026-03-10 00:27:25.125 [09c0d183] [debug]: Initializing service registry\n2026-03-10 00:27:25.126 [09c0d183] [debug]: Registered service: auth {\"dependencies\":[]}\n2026-03-10 00:27:25.126 [09c0d183] [debug]: Registered service: apiClient {\"dependencies\":[\"auth\"]}\n2026-03-10 00:27:25.127 [09c0d183] [debug]: Registered service: agentFile {\"dependencies\":[\"auth\",\"apiClient\"]}\n2026-03-10 00:27:25.127 [09c0d183] [debug]: Registered service: toolPermissions {\"dependencies\":[\"agentFile\",\"mcp\"]}\n2026-03-10 00:27:25.128 [09c0d183] [debug]: Registered service: systemMessage {\"dependencies\":[\"toolPermissions\"]}\n2026-03-10 00:27:25.128 [09c0d183] [debug]: Regi\n...[truncated 293724 chars]",
+    "stderr_excerpt": "",
+    "log_excerpt": "## Summary\n\n**Issues encountered and fixes applied:**\n\n1. **Nonexistent file read**: Attempted to read 'nonexistent.txt' which didn't exist - resulted in expected file not found error.\n2. **File creation**: Created the file with sample content successfully.\n3. **File verification**: Confirmed the created file was readable with correct content.\n4. **Python syntax error**: The command `python -c \"print(hello world\"` failed with a SyntaxError due to:\n   - Missing closing parenthesis\n   - Missing quotes around the string argument\n5. **Fix applied**: Corrected the command to `python -c \"print('hello world')\"` which properly:\n   - Wrapped the string in quotes\n   - Closed the parenthesis\n6. **Rerun succeeded**: The corrected command executed successfully and printed \"hello world\"\n\n**Final verification checklist:**\n\nINTENTIONAL_ERROR_TRIGGERED=true\nERROR_DETECTED=true\nFIX_APPLIED=true\nRERUN_SUCCEEDED=true\nFINAL_OUTPUT_VERIFIED=true\n\n[TRACE_LOG:/Users/Raymond/.continue/logs/cn.log]\n2026-03-10 00:27:22.270 [c70e31bf] [debug]: Received chunk {\"chunkCount\":8,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"File created:** `\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642246,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.271 [c70e31bf] [debug]: Received chunk {\"chunkCount\":9,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"fibonacci.py`\\n- **Main\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642247,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.731 [c70e31bf] [debug]: Received chunk {\"chunkCount\":10,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" function:** `calculate_fibonacci(n\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642448,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.732 [c70e31bf] [debug]: Received chunk {\"chunkCount\":11,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\")` -\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642449,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":12,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" efficiently\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":13,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" calculates the nth Fibonacci number using\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.733 [c70e31bf] [debug]: Received chunk {\"chunkCount\":14,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" an\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642450,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.734 [c70e31bf] [debug]: Received chunk {\"chunkCount\":15,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" iterative approach\\n- **Test\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":16,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" result\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":17,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\":** The \",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642451,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.735 [c70e31bf] [debug]: Received chunk {\"chunkCount\":18,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"10th Fibonacci number is **55\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642664,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.736 [c70e31bf] [debug]: Received chunk {\"chunkCount\":19,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"**\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642665,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.736 [c70e31bf] [debug]: Received chunk {\"chunkCount\":20,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" \u2713\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642667,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.738 [c70e31bf] [debug]: Received chunk {\"chunkCount\":21,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"\\n- **Verification:** The sequence\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642667,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":22,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" is\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642668,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":23,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" correct (\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642668,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":24,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"0, 1, 1,\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642669,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.739 [c70e31bf] [debug]: Received chunk {\"chunkCount\":25,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" 2, 3, 5\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642669,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.882 [c70e31bf] [debug]: Received chunk {\"chunkCount\":26,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\", 8, 13, \",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642869,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.885 [c70e31bf] [debug]: Received chunk {\"chunkCount\":27,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"21, 34,\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642870,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.888 [c70e31bf] [debug]: Received chunk {\"chunkCount\":28,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" 55)\\n\\nThe\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642871,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.890 [c70e31bf] [debug]: Received chunk {\"chunkCount\":29,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" script runs\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642872,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.891 [c70e31bf] [debug]: Received chunk {\"chunkCount\":30,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" without errors and correctly comp\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642872,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.892 [c70e31bf] [debug]: Received chunk {\"chunkCount\":31,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"utes\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642873,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.892 [c70e31bf] [debug]: Received chunk {\"chunkCount\":32,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" Fibonacci numbers.\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642874,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:22.893 [c70e31bf] [debug]: Received chunk {\"chunkCount\":33,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" The\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127642874,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.128 [c70e31bf] [debug]: Received chunk {\"chunkCount\":34,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" implementation\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643109,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.129 [c70e31bf] [debug]: Received chunk {\"chunkCount\":35,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" uses\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643111,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.131 [c70e31bf] [debug]: Received chunk {\"chunkCount\":36,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\" an efficient O\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643113,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.131 [c70e31bf] [debug]: Received chunk {\"chunkCount\":37,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"(n) time complexity algorithm that av\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643116,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.137 [c70e31bf] [debug]: Received chunk {\"chunkCount\":38,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"oids recurs\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643120,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.137 [c70e31bf] [debug]: Received chunk {\"chunkCount\":39,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\"ion overhead\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643120,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.138 [c70e31bf] [debug]: Received chunk {\"chunkCount\":40,\"chunk\":{\"choices\":[{\"delta\":{\"content\":\".\",\"role\":\"assistant\"},\"finish_reason\":\"stop\",\"index\":0,\"logprobs\":null}],\"created\":1773127643123,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:23.425 [c70e31bf] [debug]: Received chunk {\"chunkCount\":41,\"chunk\":{\"choices\":[],\"usage\":{\"completion_tokens\":157,\"prompt_tokens\":3770,\"total_tokens\":3927,\"prompt_tokens_details\":{\"cache_write_tokens\":0,\"cache_read_tokens\":0,\"cached_tokens\":0}},\"created\":1773127643140,\"id\":\"\",\"model\":\"claude-haiku-4-5\",\"object\":\"chat.completion.chunk\"}}\n2026-03-10 00:27:25.122 [09c0d183] [debug]: Verbose logging enabled\n2026-03-10 00:27:25.124 [09c0d183] [debug]: Running in headless mode (TTY-less compatible)\n2026-03-10 00:27:25.125 [09c0d183] [debug]: Initializing service registry\n2026-03-10 00:27:25.126 [09c0d183] [debug]: Registered service: auth {\"dependencies\":[]}\n2026-03-10 00:27:25.126 [09c0d183] [debug]: Registered service: apiClient {\"dependencies\":[\"auth\"]}\n2026-03-10 00:27:25.127 [09c0d183] [debug]: Registered service: agentFile {\"dependencies\":[\"auth\",\"apiClient\"]}\n2026-03-10 00:27:25.127 [09c0d183] [debug]: Registered service: toolPermissions {\"dependencies\":[\"agentFile\",\"mcp\"]}\n2026-03-10 00:27:25.128 [09c0d183] [debug]: Registered service: systemMessage {\"dependencies\":[\"toolPermissions\"]}\n2026-03-10 00:27:25.128 [09c0d183] [debug]: Regi\n...[truncated 293740 chars]",
+    "file_artifacts": {
+      "nonexistent.txt": "This is sample content for testing purposes.\nThe file was created successfully.\nAll systems operational."
+    }
+  },
+  "performance": {
+    "overall_clear_score": 0.9608029437251524,
+    "overall_v2_score": 0.9608029437251524,
+    "overall_v2_run_mean": 0.8291666666666666,
+    "overall_v2_aggregated_score": 0.9608029437251524,
+    "overall_v2_diagnostic_score": 0.8073210236475542,
+    "passed_thresholds": true,
+    "dimension_scores": {
+      "cost": 1.0,
+      "reliability": 0.4465608465608466,
+      "efficiency": 0.8377522786458332,
+      "latency": 0.8649629056453705,
+      "assurance": 0.7896660052910053
+    },
+    "v2_dimension_scores": {
+      "outcome": 0.9166666666666666,
+      "safety": 1.0,
+      "robustness": 0.9915147186257615,
+      "basic_efficiency": 1.0
+    },
+    "v2_diagnostic_dimension_scores": {
+      "process": 0.8294784580498867,
+      "tool_efficiency": 0.6666666666666666,
+      "trace_quality": 1.0
+    },
+    "v2_dimension_details": {
+      "basic_efficiency": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "wall_clock_time"
+        ],
+        "missing_reasons": []
+      },
+      "cost_efficiency": {
+        "score": null,
+        "supported": false,
+        "observed": false,
+        "evidence_sources": [
+          "provider_cost"
+        ],
+        "missing_reasons": [
+          "provider_cost_unavailable"
+        ]
+      },
+      "outcome": {
+        "score": 0.9166666666666666,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "checker"
+        ],
+        "missing_reasons": []
+      },
+      "process": {
+        "score": 0.8294784580498867,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "structured_trace",
+          "timeline"
+        ],
+        "missing_reasons": []
+      },
+      "robustness": {
+        "score": 0.9915147186257615,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "single_run_proxy"
+        ],
+        "missing_reasons": []
+      },
+      "safety": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "stdout",
+          "stderr",
+          "checker"
+        ],
+        "missing_reasons": []
+      },
+      "token_efficiency": {
+        "score": null,
+        "supported": false,
+        "observed": false,
+        "evidence_sources": [
+          "session_stats_tokens"
+        ],
+        "missing_reasons": [
+          "token_usage_unavailable"
+        ]
+      },
+      "tool_efficiency": {
+        "score": 0.6666666666666666,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "tool_trace"
+        ],
+        "missing_reasons": []
+      },
+      "trace_quality": {
+        "score": 1.0,
+        "supported": true,
+        "observed": true,
+        "evidence_sources": [
+          "trace_signal"
+        ],
+        "missing_reasons": []
+      }
+    },
+    "unknown_dimensions": [
+      "cost_efficiency",
+      "token_efficiency"
+    ],
+    "score_coverage": 1.0
+  },
+  "evidence_quality": {
+    "primary_tier": "checker-grounded",
+    "tier_scores": {
+      "heuristic": 0.8039021164021163,
+      "soft-match": 0.8181818181818182,
+      "checker-grounded": 1.0,
+      "exact": 0.4444444444444444
+    },
+    "high_supervision_available": true,
+    "high_supervision_score": 1.0,
+    "high_supervision_coverage": 1.0,
+    "checker_executed": true,
+    "checker_passed": true,
+    "include_in_total_score": false,
+    "evidence_quality_in_total": false,
+    "provisional_threshold": 0.4,
+    "aggregated_over_runs": 3,
+    "checker_subchecks_summary": {
+      "error_detected": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "exit_code_success": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "file_artifact:nonexistent.txt": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "final_output_verified": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "fix_applied": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "intentional_error_triggered": {
+        "pass_count": 3,
+        "run_count": 3
+      },
+      "rerun_succeeded": {
+        "pass_count": 3,
+        "run_count": 3
+      }
+    }
+  },
+  "comparability": {
+    "status": "COMPARABLE",
+    "core_status": "COMPARABLE",
+    "full_status": "COMPARABLE",
+    "reasons": [],
+    "core_reasons": [],
+    "full_reasons": [],
+    "core_comparable": true,
+    "eligible_for_main_leaderboard": true,
+    "eligible_for_full_leaderboard": true,
+    "dimension_status": {
+      "outcome": "COMPARABLE",
+      "safety": "COMPARABLE",
+      "robustness": "COMPARABLE",
+      "basic_efficiency": "COMPARABLE",
+      "process": "COMPARABLE",
+      "tool_efficiency": "COMPARABLE",
+      "cost_efficiency": "UNSUPPORTED",
+      "token_efficiency": "UNSUPPORTED",
+      "trace_quality": "COMPARABLE"
+    },
+    "required_signal_status": {
+      "checker_executed": true,
+      "provider_cost": false,
+      "repeated_runs": true,
+      "session_stats": false,
+      "step_trace": true,
+      "structured_trace": true,
+      "timeline_events": true,
+      "token_usage": false,
+      "tool_trace": true,
+      "wall_clock_time": true
+    },
+    "score_coverage": 1.0
+  },
+  "gate_status": {
+    "safety_gate": {
+      "status": "pass",
+      "cap": 0.2
+    },
+    "critical_function_gate": {
+      "status": "pass",
+      "cap": 0.45
+    },
+    "oracle_gate": {
+      "status": "pass",
+      "cap": 0.6
+    },
+    "final_cap": 1.0,
+    "raw_score_before_gate": 0.9608029437251524,
+    "aggregated_over_runs": 3
+  },
+  "is_provisional": false,
+  "repeat_stats": {
+    "run_count": 3,
+    "pass_rate": 1.0,
+    "overall_v2_mean": 0.8291666666666666,
+    "overall_v2_aggregated_score": 0.9608029437251524,
+    "overall_v2_std": 0.010606601717798196,
+    "overall_v2_ci95": 0.012002499739637554,
+    "overall_v2_diagnostic_mean": 0.8073210236475541,
+    "overall_v2_diagnostic_std": 0.00036649525425935976,
+    "overall_v2_diagnostic_ci95": 0.00041472842205858893,
+    "run_scores": [
+      0.8216666666666667,
+      0.8441666666666666,
+      0.8216666666666667
+    ],
+    "run_diagnostic_scores": [
+      0.8075801749271136,
+      0.8068027210884352,
+      0.8075801749271136
+    ],
+    "run_checker_passed": [
+      true,
+      true,
+      true
+    ],
+    "run_checker_subchecks": [
+      {
+        "file_artifact:nonexistent.txt": true,
+        "exit_code_success": true,
+        "intentional_error_triggered": true,
+        "error_detected": true,
+        "fix_applied": true,
+        "rerun_succeeded": true,
+        "final_output_verified": true
+      },
+      {
+        "file_artifact:nonexistent.txt": true,
+        "exit_code_success": true,
+        "intentional_error_triggered": true,
+        "error_detected": true,
+        "fix_applied": true,
+        "rerun_succeeded": true,
+        "final_output_verified": true
+      },
+      {
+        "file_artifact:nonexistent.txt": true,
+        "exit_code_success": true,
+        "intentional_error_triggered": true,
+        "error_detected": true,
+        "fix_applied": true,
+        "rerun_succeeded": true,
+        "final_output_verified": true
+      }
+    ],
+    "run_output_lengths": [
+      305724,
+      305778,
+      305611
+    ],
+    "run_file_artifact_names": [
+      [
+        "nonexistent.txt"
+      ],
+      [
+        "nonexistent.txt"
+      ],
+      [
+        "nonexistent.txt"
+      ]
+    ]
+  },
+  "time_breakdown": {
+    "llm_inference_s": null,
+    "tool_execution_s": 7.789999999999999,
+    "coordination_s": 8.416666666666666,
+    "method": "multi_run_mean_no_llm_events",
+    "is_estimated": true,
+    "llm_observed_runs": 0,
+    "aggregated_over_runs": 3,
+    "breakdown_run_count": 3,
+    "total_time_basis_s": 16.21,
+    "phase_observation_status": "no_llm_events",
+    "llm_inference_pct": null,
+    "tool_execution_pct": 48.1,
+    "coordination_pct": 51.9
+  },
+  "step_resource_profiles": [
+    {
+      "step": 1,
+      "event_type": "error",
+      "time_offset_s": 0.05,
+      "cpu_percent": 2.2,
+      "memory_mb": 2.9
+    },
+    {
+      "step": 4,
+      "event_type": "error",
+      "time_offset_s": 0.09,
+      "cpu_percent": 2.2,
+      "memory_mb": 2.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 0.23,
+      "cpu_percent": 2.2,
+      "memory_mb": 2.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 0.24,
+      "cpu_percent": 2.2,
+      "memory_mb": 2.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 0.62,
+      "cpu_percent": 2.5,
+      "memory_mb": 208.8
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 1.46,
+      "cpu_percent": 1.9,
+      "memory_mb": 310.4
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 1.5,
+      "cpu_percent": 1.9,
+      "memory_mb": 310.4
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 1.63,
+      "cpu_percent": 1.9,
+      "memory_mb": 310.4
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 3.97,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 3.98,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 4.02,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "tool_call",
+      "time_offset_s": 4.04,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 4.04,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 4.05,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 4.08,
+      "cpu_percent": 0.2,
+      "memory_mb": 325.8
+    },
+    {
+      "step": 6,
+      "event_type": "tool_call",
+      "time_offset_s": 4.47,
+      "cpu_percent": 0.3,
+      "memory_mb": 327.9
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 4.49,
+      "cpu_percent": 0.3,
+      "memory_mb": 327.9
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 4.51,
+      "cpu_percent": 0.3,
+      "memory_mb": 327.9
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 4.53,
+      "cpu_percent": 0.3,
+      "memory_mb": 327.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 4.88,
+      "cpu_percent": 0.2,
+      "memory_mb": 329.0
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 5.2,
+      "cpu_percent": 0.2,
+      "memory_mb": 329.0
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 6.1,
+      "cpu_percent": 0.3,
+      "memory_mb": 329.3
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 6.14,
+      "cpu_percent": 0.3,
+      "memory_mb": 329.3
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 6.27,
+      "cpu_percent": 0.3,
+      "memory_mb": 329.3
+    },
+    {
+      "step": 6,
+      "event_type": "tool_call",
+      "time_offset_s": 9.93,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "tool_call",
+      "time_offset_s": 10.0,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.01,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.04,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.05,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.08,
+      "cpu_percent": 0.0,
+      "memory_mb": 254.7
+    },
+    {
+      "step": 6,
+      "event_type": "tool_call",
+      "time_offset_s": 10.6,
+      "cpu_percent": 0.8,
+      "memory_mb": 254.1
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.63,
+      "cpu_percent": 0.8,
+      "memory_mb": 254.1
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.64,
+      "cpu_percent": 0.8,
+      "memory_mb": 254.1
+    },
+    {
+      "step": 6,
+      "event_type": "success",
+      "time_offset_s": 10.67,
+      "cpu_percent": 0.8,
+      "memory_mb": 254.1
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 11.82,
+      "cpu_percent": 0.5,
+      "memory_mb": 258.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 11.86,
+      "cpu_percent": 0.5,
+      "memory_mb": 258.9
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 11.99,
+      "cpu_percent": 0.1,
+      "memory_mb": 242.8
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 15.36,
+      "cpu_percent": 0.0,
+      "memory_mb": 207.1
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 15.4,
+      "cpu_percent": 0.0,
+      "memory_mb": 207.1
+    },
+    {
+      "step": 6,
+      "event_type": "error",
+      "time_offset_s": 15.54,
+      "cpu_percent": 0.0,
+      "memory_mb": 207.1
+    }
+  ],
+  "recommendations": [
+    "\ud83d\udd27 Improve tool selection - accuracy 0.67",
+    "\ud83d\udd04 Improve error recovery - better adaptation to failures",
+    "\ud83d\udcb2 Cost is estimated (not provider-reported) and excluded from strict scoring",
+    "\ud83d\udcc9 Unknown dimensions: cost_efficiency, token_efficiency"
+  ],
+  "evaluation_settings": {
+    "scoring_version": "v2",
+    "runs_per_task": 3,
+    "main_leaderboard_core_suite_only": true,
+    "evaluation_agent_id": "continue",
+    "capability_profile_applied": true,
+    "capability_profile_path": "/Users/Raymond/Desktop/Desktop - Raymond's MacBook Pro/CSE/Team28/agentic_sys/config/artifacts/capability_profiles/continue.json",
+    "declared_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": false,
+      "provider_cost": false,
+      "token_usage": false,
+      "skills_runtime": false,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    },
+    "probed_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": true,
+      "provider_cost": true,
+      "token_usage": true,
+      "skills_runtime": true,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    },
+    "trace_parser_profile": {
+      "step_patterns": [
+        "(?:\\bStep\\s+(\\d+)\\b|\"step\"\\s*:\\s*(\\d+)|^\\s*(\\d+)\\.)"
+      ],
+      "thinking_patterns": [
+        "(?i)^\\s*(thinking|reasoning)\\s*[:\uff1a]"
+      ],
+      "error_patterns": [
+        "(?i)(error|traceback|exception|failed)"
+      ],
+      "assistant_patterns": [
+        "(?i)^\\s*(assistant|final)\\s*[:\uff1a]"
+      ],
+      "tool_result_patterns": [
+        "(?i)(tool result|result\\s*[:\uff1a]|completed)"
+      ],
+      "tool_call_patterns": [
+        "\"toolName\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\"",
+        "\"function\"\\s*:\\s*\\{\\s*\"name\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\"",
+        "(?i)tool\\s*call\\s*[:\uff1a]\\s*([a-zA-Z_][a-zA-Z0-9_\\-]*)",
+        "^[\\s>*-]*[\u25cb\u25cf]\\s*([A-Za-z_][A-Za-z0-9_]*)\\("
+      ],
+      "log_file_patterns": [
+        "(?i)log file:\\s*(.+\\.log)"
+      ],
+      "detailed_log_tool_patterns": [
+        "\"toolName\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\"",
+        "\"function\"\\s*:\\s*\\{\\s*\"name\"\\s*:\\s*\"([a-zA-Z_][a-zA-Z0-9_\\-]*)\""
+      ],
+      "tool_aliases": {
+        "Write": "write_file",
+        "Read": "read_file",
+        "Bash": "bash",
+        "MultiEdit": "edit_file",
+        "Edit": "edit_file"
+      },
+      "enforce_known_tools": false
+    },
+    "resolved_capabilities": {
+      "structured_trace": true,
+      "tool_trace": true,
+      "step_trace": true,
+      "timeline_events": true,
+      "session_stats": false,
+      "provider_cost": false,
+      "token_usage": false,
+      "skills_runtime": false,
+      "checker_support": {
+        "file_artifacts": true,
+        "stdout_capture": true,
+        "exit_code": true,
+        "behavior_validation": true
+      }
+    }
+  },
+  "timestamp": 1773135133,
+  "run_id": "20260310_022844"
+}

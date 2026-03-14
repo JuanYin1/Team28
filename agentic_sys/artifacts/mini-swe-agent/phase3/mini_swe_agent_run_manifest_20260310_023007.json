@@ -1,0 +1,16 @@
+{
+  "schema_version": "phase3.run_manifest.v1",
+  "run_id": "20260310_023007",
+  "agent_id": "mini-swe-agent",
+  "results_dir": "artifacts/mini-swe-agent/phase3",
+  "generated_at": "2026-03-10T02:38:45.760346",
+  "artifacts": [
+    "mini_swe_agent_simple_file_operations_1773135061.json",
+    "mini_swe_agent_python_coding_task_1773135206.json",
+    "mini_swe_agent_data_analysis_task_1773135371.json",
+    "mini_swe_agent_error_handling_test_1773135525.json",
+    "mini_swe_agent_clear_report_20260310_023007.md",
+    "mini_swe_agent_leaderboard_core_20260310_023007.csv",
+    "mini_swe_agent_leaderboard_full_20260310_023007.csv"
+  ]
+}

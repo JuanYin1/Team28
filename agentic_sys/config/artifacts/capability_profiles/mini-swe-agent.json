@@ -1,0 +1,89 @@
+{
+  "profile_metadata": {
+    "auto_generated": true,
+    "do_not_edit_manually": true,
+    "notice": "AUTO-GENERATED FILE. DO NOT EDIT MANUALLY. Regenerate with --refresh-capability-profile or --probe-agent.",
+    "generated_at_utc": "2026-03-10T09:30:07Z"
+  },
+  "agent_id": "mini-swe-agent",
+  "declared_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": true,
+    "timeline_events": true,
+    "session_stats": false,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": true,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "probed_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": true,
+    "timeline_events": true,
+    "session_stats": true,
+    "provider_cost": true,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": true,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "resolved_capabilities": {
+    "structured_trace": true,
+    "tool_trace": true,
+    "step_trace": true,
+    "timeline_events": true,
+    "session_stats": false,
+    "provider_cost": false,
+    "token_usage": false,
+    "skills_runtime": false,
+    "checker_support": {
+      "file_artifacts": true,
+      "stdout_capture": true,
+      "exit_code": true,
+      "behavior_validation": true
+    }
+  },
+  "probe_results": [
+    {
+      "success": true,
+      "return_code": 0,
+      "reported_duration_s": 23.85996174812317,
+      "wall_clock_duration_s": 23.861568927764893,
+      "artifact_exists": true
+    },
+    {
+      "success": false,
+      "return_code": -9,
+      "reported_duration_s": 30.029963970184326,
+      "wall_clock_duration_s": 30.031779050827026,
+      "artifact_exists": false
+    },
+    {
+      "success": false,
+      "return_code": -9,
+      "reported_duration_s": 30.025985717773438,
+      "wall_clock_duration_s": 30.02702498435974,
+      "artifact_exists": false
+    },
+    {
+      "success": false,
+      "return_code": -9,
+      "reported_duration_s": 30.031949043273926,
+      "wall_clock_duration_s": 30.033411026000977,
+      "artifact_exists": false
+    }
+  ],
+  "generated_at_unix": 1773135007,
+  "generated_at_utc": "2026-03-10T09:30:07Z"
+}
