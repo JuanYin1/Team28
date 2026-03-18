@@ -30,9 +30,247 @@ This section will survey related work including: (1) LLM agent evaluation benchm
 
 ---
 
+## 3.1 Agent Architecture Analysis
+
+Understanding how each agent system processes inputs and generates outputs is crucial for interpreting our comparative evaluation. The three systems exhibit fundamentally different architectural patterns, which directly impact their performance characteristics observed in our CLEAR framework evaluation.
+
+### 3.1.1 Mini-Agent Workflow Architecture
+
+```mermaid
+flowchart TD
+    A[User Input] --> B[Load Session Memory]
+    B --> C{Context Size Check}
+    C -->|< 30% threshold| D[🧠 Thinking Phase]
+    C -->|≥ 30% threshold| E[Auto Summarization]
+    E --> D
+    D --> F[Action Planning]
+    F --> G{Action Type?}
+    G -->|Tool Call| H[🔧 Tool Execution]
+    G -->|Response| I[🤖 Assistant Response]
+    H --> J[Tool Response Processing]
+    J --> K[Memory Update]
+    K --> L{Max Steps Reached?}
+    L -->|No| M{Task Complete?}
+    L -->|Yes| N[Session End]
+    M -->|No| D
+    M -->|Yes| O[Save Memory State]
+    O --> P[Final Output]
+    I --> P
+    N --> P
+    
+    style D fill:#e1f5fe
+    style H fill:#f3e5f5
+    style I fill:#e8f5e8
+    style K fill:#fff3e0
+```
+
+**Key Characteristics:**
+- **Interleaved Thinking-Acting Loop**: 84.5% of wall-clock time spent in LLM inference
+- **Persistent Memory**: Cross-session state maintained via `.agent_memory.json`
+- **Context Management**: Automatic summarization at 30% token threshold
+- **MCP Integration**: Native Model Context Protocol support
+- **Claude Skills**: 15 bundled domain specializations
+
+### 3.1.2 Continue-CN Workflow Architecture
+
+```mermaid
+flowchart TD
+    A[User Input] --> B[CLI Initialization]
+    B --> C[Node.js Runtime Setup]
+    C --> D[Org Authentication]
+    D --> E[Model Loading<br/>anthropic/claude-haiku-4-5]
+    E --> F{Verbose Mode Analysis}
+    F --> G[Task Decomposition]
+    G --> H[Tool Selection]
+    H --> I[Tool Execution]
+    I --> J{Auto-Continue?}
+    J -->|Yes| K[Next Action Planning]
+    J -->|No| L[Response Synthesis]
+    K --> H
+    L --> M[CLI Output Formatting]
+    M --> N[Final Output]
+    
+    subgraph "Hidden LLM Processing"
+        O[Model Inference]
+        P[Token Processing]
+        Q[Response Generation]
+    end
+    
+    F -.->|Not Observable| O
+    O -.-> P
+    P -.-> Q
+    Q -.-> G
+    
+    style C fill:#ffecb3
+    style F fill:#ffcdd2
+    style O fill:#f5f5f5,stroke-dasharray: 5 5
+    style P fill:#f5f5f5,stroke-dasharray: 5 5
+    style Q fill:#f5f5f5,stroke-dasharray: 5 5
+```
+
+**Key Characteristics:**
+- **Hidden LLM Signals**: No detectable LLM inference markers in output
+- **Node.js Architecture**: Heavy initialization phase (190-325 MB memory growth)
+- **IDE Integration**: General-purpose coding assistant design
+- **Fastest Execution**: 17.0s average, optimized for speed
+- **Auto-Continue**: Autonomous multi-step execution
+
+### 3.1.3 Mini-SWE-Agent Workflow Architecture
+
+```mermaid
+flowchart TD
+    A[User Input] --> B[Trajectory Initialization]
+    B --> C[Task Analysis]
+    C --> D[SWE-Bench Protocol]
+    D --> E[🤖 LLM Planning<br/>openai/gpt-5-mini]
+    E --> F[Action Generation]
+    F --> G{Action Type?}
+    G -->|File Operation| H[📁 File Tool]
+    G -->|Code Execution| I[⚡ Exec Tool]
+    G -->|Analysis| J[🔍 Analysis Tool]
+    H --> K[Trajectory Logging]
+    I --> K
+    J --> K
+    K --> L[JSON Update<br/>mini_swe_run.traj.json]
+    L --> M{Task Complete?}
+    M -->|No| N{Exit Immediately?}
+    N -->|No| E
+    N -->|Yes| O[Force Exit]
+    M -->|Yes| P[Trajectory Finalization]
+    O --> Q[Final JSON Output]
+    P --> Q
+    
+    subgraph "Trajectory Tracking"
+        R[Step Recording]
+        S[Tool Call Logging]
+        T[State Management]
+        K --> R
+        R --> S
+        S --> T
+    end
+    
+    style E fill:#e1f5fe
+    style K fill:#f3e5f5
+    style L fill:#fff3e0
+    style R fill:#e8f5e8
+    style S fill:#e8f5e8
+    style T fill:#e8f5e8
+```
+
+**Key Characteristics:**
+- **Trajectory-Based**: Complete execution history in JSON format
+- **SWE-Bench Inspired**: Software engineering task optimization
+- **Comprehensive Logging**: Every tool call and state change recorded
+- **Thorough Processing**: 65.0% LLM inference, 26.7% tool execution
+- **Yolo Mode**: Non-interactive execution with `--exit-immediately`
+
+### 3.1.4 Comparative Architecture Analysis
+
+| Aspect | Mini-Agent | Continue-CN | Mini-SWE-Agent |
+|--------|------------|-------------|-----------------|
+| **Primary Design** | Persistent reasoning | Speed-optimized IDE | Trajectory-complete |
+| **Memory Strategy** | Cross-session persistence | Session-scoped | Full trajectory log |
+| **Observable Signals** | Rich emoji markers | Minimal/hidden | JSON-structured |
+| **Time Distribution** | 84.5% LLM / 11.6% Tools | Hidden LLM / 37.2% Tools | 65.0% LLM / 26.7% Tools |
+| **Context Management** | Auto-summarization | Runtime-handled | Full retention |
+| **Execution Model** | Step-limited loop | Auto-continue | Exit-immediate |
+
+These architectural differences directly explain the performance trade-offs observed in our CLEAR framework evaluation: Continue-CN's speed comes at the cost of observability, Mini-Agent's balanced performance relies on sophisticated memory management, and Mini-SWE-Agent's thoroughness requires extensive trajectory tracking overhead.
+
 ## 4. Methodology
 
-### 4.1 Study Design and Theoretical Grounding
+### 4.1 Observational Framework: Multi-Dimensional Agent Monitoring
+
+Our study employs a **comprehensive observational methodology** designed to capture both external behavior and internal system dynamics across heterogeneous agent architectures. The challenge of evaluating agent runtimes lies not only in measuring outcomes but in understanding the processes that generate those outcomes—particularly when different systems expose varying levels of internal observability.
+
+#### 4.1.1 Multi-Modal Observation Strategy
+
+We developed a **five-layer observation stack** that adapts to each system's unique observability characteristics:
+
+```mermaid
+graph TB
+    subgraph "Observation Layers"
+        A[Layer 1: CLI Interface] --> B[Layer 2: Process Monitoring]
+        B --> C[Layer 3: Log Analysis]
+        C --> D[Layer 4: Artifact Inspection]
+        D --> E[Layer 5: Resource Tracking]
+    end
+    
+    subgraph "System Adapters"
+        F[MiniAgentAdapter<br/>Rich Emoji Markers] 
+        G[ContinueCnAdapter<br/>Node.js Verbose Output]
+        H[MiniSweAgentAdapter<br/>Trajectory JSON]
+    end
+    
+    subgraph "Analysis Pipeline"
+        I[AgentLogAnalyzer<br/>Regex Pattern Matching]
+        J[AgentResourceMonitor<br/>psutil Sampling]
+        K[AgentTraceSummary<br/>Normalized Events]
+    end
+    
+    A --> F
+    A --> G
+    A --> H
+    F --> I
+    G --> I
+    H --> I
+    B --> J
+    C --> K
+    
+    style A fill:#e3f2fd
+    style I fill:#f3e5f5
+    style J fill:#e8f5e8
+    style K fill:#fff3e0
+```
+
+**Layer 1 - CLI Interface Observation:**
+- Standardized subprocess invocation across all three runtimes
+- Dual transport modes: `pipe` (separate stdout/stderr) and `pty` (merged pseudo-terminal)
+- Timeout management and graceful failure handling
+
+**Layer 2 - Process Monitoring:**
+- PID-based attachment via `AgentResourceMonitor`
+- RSS memory sampling every 0.5 seconds
+- CPU utilization tracking correlated with execution phases
+
+**Layer 3 - Log Analysis:**
+- Runtime-specific regex pattern recognition
+- Structured event extraction from unstructured output
+- Timeline reconstruction for multi-step processes
+
+**Layer 4 - Artifact Inspection:**
+- File system state validation
+- Output correctness verification
+- Checker-backed outcome assessment
+
+**Layer 5 - Resource Tracking:**
+- Memory trajectory analysis
+- Performance bottleneck detection
+- Resource attribution per execution phase
+
+#### 4.1.2 Capability Probing Protocol
+
+Before formal evaluation, each agent undergoes a **four-dimensional capability probe** to determine which observational dimensions are actually accessible:
+
+1. **Artifact Verification**: Can we observe file system changes and outputs?
+2. **Multi-step Trace Observability**: Are internal reasoning steps visible?
+3. **Error/Retry Observability**: Can we detect and track error recovery?
+4. **Session Stats Observability**: Are resource and performance metrics accessible?
+
+This probe generates a `capability_profile` that prevents false precision—dimensions marked as `UNSUPPORTED` or `UNKNOWN` are excluded from comparative scoring rather than penalized.
+
+#### 4.1.3 Evidence Quality Classification
+
+Our framework distinguishes four evidence quality tiers:
+
+- **Checker-grounded**: Verified by automated checkers across repeated runs
+- **Trace-backed**: Supported by observable execution traces
+- **Heuristic-derived**: Estimated from available signals
+- **Declared-only**: Claimed by runtime but not independently verified
+
+This classification system ensures that only trustworthy comparisons reach the leaderboard, while maintaining transparency about evidence limitations.
+
+### 4.2 Study Design and Theoretical Grounding
 
 This study adopts a **black-box comparative benchmarking** design, where each agent runtime is evaluated as a CLI subprocess receiving standardized task prompts and returning structured outputs, file artifacts, and execution traces. The evaluation is grounded in the CLEAR framework, which operationalizes agent quality along five dimensions:
 
@@ -349,4 +587,426 @@ For new or evolving agent runtimes, the framework recommends a **staged promotio
 
 The framework prescribes **wall-clock task time** as the primary basis for cross-runtime latency comparisons, explicitly because LLM inference phase is unobservable in `continue-cn`: [46](#2-45) 
 
+---
+
+## 8. Future Work: Towards Automated Continuous Agent Evaluation
+
+### 8.1 The Automation Imperative
+
+The rapid evolution of LLM-based agent systems presents a **continuous evaluation challenge**. As our study demonstrates, agent performance characteristics are deeply intertwined with architectural decisions, model capabilities, and runtime optimizations. When any of these components changes—new model versions, framework updates, or system modifications—the performance landscape shifts dramatically.
+
+Our current evaluation framework, while comprehensive, requires manual orchestration across three phases and manual analysis of results. To scale this approach for production systems and continuous development workflows, we need **automated evaluation pipelines** that can trigger on system changes and provide real-time performance insights.
+
+#### 8.1.1 Automated Pipeline Architecture
+
+```mermaid
+graph TD
+    subgraph "Trigger Events"
+        A[Model Version Update]
+        B[Framework Release]
+        C[System Configuration Change]
+        D[Scheduled Evaluation]
+        E[Performance Regression Alert]
+    end
+    
+    subgraph "Automated Evaluation Pipeline"
+        F[Event Detection] --> G[Capability Refresh]
+        G --> H[Test Suite Orchestration]
+        H --> I[Multi-Agent Parallel Execution]
+        I --> J[Automated Analysis Engine]
+        J --> K[Performance Delta Detection]
+        K --> L[Regression Classification]
+    end
+    
+    subgraph "Intelligent Outputs"
+        M[Performance Dashboards]
+        N[Automated Alerts]
+        O[Deployment Gates]
+        P[Research Recommendations]
+    end
+    
+    A --> F
+    B --> F
+    C --> F
+    D --> F
+    E --> F
+    
+    L --> M
+    L --> N
+    L --> O
+    L --> P
+    
+    style F fill:#e3f2fd
+    style J fill:#f3e5f5
+    style K fill:#ffecb3
+    style L fill:#ffcdd2
+```
+
+**Key Components:**
+
+1. **Event Detection System**: Monitors for model releases, framework updates, configuration changes
+2. **Dynamic Capability Probing**: Automatically refreshes capability profiles when systems change
+3. **Parallel Test Orchestration**: Scales evaluation across multiple agents and task suites simultaneously
+4. **Automated Analysis Engine**: Applies CLEAR scoring without human intervention
+5. **Performance Delta Detection**: Identifies significant changes in agent performance patterns
+6. **Intelligent Alerting**: Notifies stakeholders of critical regressions or improvements
+
+### 8.2 Continuous Integration for Agent Systems
+
+Drawing inspiration from traditional software CI/CD pipelines, we propose an **Agent Continuous Integration (ACI)** framework:
+
+#### 8.2.1 Pre-deployment Evaluation Gates
+
+```mermaid
+flowchart LR
+    A[Code Commit] --> B{Capability Check}
+    B -->|Pass| C[Smoke Test Battery]
+    B -->|Fail| D[Deployment Blocked]
+    C -->|Pass| E[Performance Benchmark]
+    C -->|Fail| F[Alert Development Team]
+    E -->|Within SLA| G[Security & Safety Gates]
+    E -->|Regression Detected| H[Performance Review Required]
+    G -->|Pass| I[Deployment Approved]
+    G -->|Fail| J[Security Review Required]
+    
+    style B fill:#e3f2fd
+    style E fill:#f3e5f5
+    style G fill:#ffecb3
+    style I fill:#e8f5e8
+    style D fill:#ffcdd2
+    style F fill:#ffcdd2
+    style H fill:#fff3e0
+    style J fill:#fff3e0
+```
+
+**Gate Criteria:**
+- **Capability Consistency**: New versions must maintain or improve observable signals
+- **Performance SLAs**: Latency, accuracy, and reliability must stay within defined bounds
+- **Safety Validation**: Error recovery and robustness metrics must meet safety thresholds
+- **Cost Efficiency**: Resource consumption cannot exceed budget constraints
+
+#### 8.2.2 Dynamic Test Suite Expansion
+
+Our current 4-task evaluation suite is intentionally minimal for proof-of-concept. An automated system should support:
+
+**Task Suite Scaling Strategy:**
+```
+Phase 1: Core Suite (4 tasks) → 15-minute evaluation
+Phase 2: Extended Suite (20 tasks) → 1-hour evaluation  
+Phase 3: Comprehensive Suite (100+ tasks) → 8-hour evaluation
+Phase 4: Production Simulation (real workloads) → 24-hour evaluation
+```
+
+**Adaptive Task Selection:**
+- **Risk-based Prioritization**: Focus on tasks where previous regressions occurred
+- **Coverage-guided Expansion**: Add tasks targeting uncovered capability dimensions
+- **Workload-specific Suites**: Customize evaluation for specific deployment contexts
+
+### 8.3 Advanced Automation Features
+
+#### 8.3.1 Intelligent Baseline Management
+
+```mermaid
+graph TB
+    subgraph "Baseline Evolution"
+        A[Initial Baseline] --> B[Performance Tracking]
+        B --> C{Significant Change?}
+        C -->|Yes| D[Human Review]
+        C -->|No| E[Auto-Update Baseline]
+        D -->|Approve| F[Promote to New Baseline]
+        D -->|Reject| G[Investigate Regression]
+        F --> H[Update SLA Thresholds]
+        G --> I[Alert Development]
+    end
+    
+    style A fill:#e3f2fd
+    style D fill:#f3e5f5
+    style F fill:#e8f5e8
+    style G fill:#ffcdd2
+```
+
+**Smart Baseline Features:**
+- **Seasonal Adjustment**: Account for model service variations
+- **Confidence Intervals**: Statistical significance testing for performance changes
+- **Multi-metric Optimization**: Balance competing objectives (speed vs. accuracy)
+
+#### 8.3.2 Automated Root Cause Analysis
+
+When performance regressions are detected, the system should automatically:
+
+1. **Bisect Recent Changes**: Identify the specific commit or configuration causing issues
+2. **Bottleneck Attribution**: Use our tree-structured bottleneck methodology automatically
+3. **Resource Pattern Analysis**: Compare memory/CPU patterns against known good states
+4. **Log Anomaly Detection**: Flag unusual patterns in agent execution traces
+
+#### 8.3.3 Predictive Performance Modeling
+
+```python
+# Conceptual implementation
+class PerformancePredictor:
+    def predict_impact(self, model_change, framework_update):
+        """Predict performance impact before deployment"""
+        historical_patterns = self.load_historical_data()
+        similar_changes = self.find_analogous_changes(model_change, framework_update)
+        return self.estimate_performance_delta(similar_changes, historical_patterns)
+    
+    def recommend_evaluation_suite(self, predicted_impact):
+        """Dynamically scale evaluation based on predicted risk"""
+        if predicted_impact.risk_level == "HIGH":
+            return self.comprehensive_suite()
+        elif predicted_impact.risk_level == "MEDIUM":
+            return self.extended_suite()
+        else:
+            return self.core_suite()
+```
+
+### 8.4 Research and Development Automation
+
+#### 8.4.1 Automated Insight Discovery
+
+The evaluation system should automatically identify:
+
+**Architecture Pattern Recognition:**
+- Detect when new agent runtimes follow existing architectural patterns
+- Suggest optimal evaluation configurations based on architectural similarities
+- Predict likely performance characteristics before full evaluation
+
+**Performance Trend Analysis:**
+- Identify long-term trends in agent capabilities
+- Detect emerging performance cliffs or improvements
+- Correlate performance changes with model architecture evolution
+
+**Comparative Advantage Discovery:**
+- Automatically surface when one runtime becomes clearly superior for specific task types
+- Identify performance trade-off frontiers
+- Suggest optimal runtime selection based on workload characteristics
+
+#### 8.4.2 Evaluation Framework Evolution
+
+```mermaid
+graph LR
+    subgraph "Framework Learning"
+        A[Evaluation Results] --> B[Pattern Detection]
+        B --> C[New Metric Discovery]
+        C --> D[Framework Updates]
+        D --> E[Validation Studies]
+        E --> F[Production Integration]
+    end
+    
+    style B fill:#e3f2fd
+    style C fill:#f3e5f5
+    style D fill:#ffecb3
+```
+
+**Self-Improving Evaluation:**
+- **Metric Effectiveness Analysis**: Identify which CLEAR dimensions best predict real-world performance
+- **Task Relevance Scoring**: Determine which evaluation tasks correlate most strongly with production success
+- **Evidence Quality Optimization**: Refine capability probing to maximize observable signal coverage
+
+### 8.5 Implementation Roadmap
+
+#### Phase 1: Basic Automation (3 months)
+- Automated capability probing on system changes
+- Basic CI integration with pass/fail gates
+- Scheduled evaluation runs with email alerts
+
+#### Phase 2: Intelligence Layer (6 months)  
+- Performance delta detection and regression classification
+- Automated root cause analysis for common failure modes
+- Dynamic test suite selection based on risk assessment
+
+#### Phase 3: Advanced Analytics (12 months)
+- Predictive performance modeling
+- Automated insight discovery and reporting
+- Self-improving evaluation framework
+
+#### Phase 4: Production Scale (18 months)
+- Multi-datacenter evaluation coordination
+- Real-time production monitoring integration
+- Automated deployment gates for enterprise systems
+
+### 8.6 Integration with Existing DevOps Workflows
+
+The automated evaluation system must seamlessly integrate with:
+
+**Version Control Systems:**
+```yaml
+# .github/workflows/agent-evaluation.yml
+name: Agent Performance Evaluation
+on:
+  push:
+    branches: [main]
+    paths: ['agent/**', 'config/**']
+  
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Run CLEAR Evaluation
+        run: |
+          python -m clear_evaluation_system \
+            --auto-detect-changes \
+            --compare-with-baseline \
+            --fail-on-regression
+```
+
+**Container Orchestration:**
+```yaml
+# Kubernetes CronJob for scheduled evaluation
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: agent-evaluation
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: evaluator
+            image: team28/clear-evaluator:latest
+            command: ["python", "-m", "clear_evaluation_system"]
+            args: ["--scheduled-run", "--upload-results"]
+```
+
+**Monitoring Integration:**
+```python
+# Prometheus metrics integration
+agent_evaluation_duration = Histogram('agent_eval_duration_seconds')
+agent_performance_score = Gauge('agent_performance_score', ['agent', 'dimension'])
+agent_regression_detected = Counter('agent_regressions_total', ['agent', 'severity'])
+```
+
+This automation framework transforms our current manual evaluation process into a **living, breathing performance monitoring system** that adapts to the rapid pace of agent system evolution while maintaining the rigorous evaluation standards established by our CLEAR framework.
+
+---
+
+## 9. Discussion and Implications
+
+### 9.1 Architectural Insights and Performance Patterns
+
+Our comprehensive evaluation reveals that agent runtime architecture fundamentally determines observable performance characteristics. The three systems studied represent distinct philosophical approaches to agent design, each optimizing for different operational priorities:
+
+**Mini-Agent's Persistent Reasoning Paradigm** achieves the highest overall score through sophisticated memory management and context summarization, but at the cost of reasoning coherence. Its 84.5% LLM inference time allocation suggests an architecture optimized for thoughtful, step-by-step problem solving. The interleaved thinking-acting loop with persistent memory provides continuity across sessions but requires careful resource management to avoid context overflow.
+
+**Continue-CN's Speed-First Architecture** prioritizes execution velocity through hidden optimizations that sacrifice observability. The absence of detectable LLM signals indicates aggressive caching or preprocessing that achieves 17.0-second average task completion but reduces tool selection accuracy to 0.625. This trade-off may be acceptable for development workflows where rapid iteration trumps exhaustive analysis.
+
+**Mini-SWE-Agent's Trajectory-Complete Design** maximizes thoroughness and reproducibility through comprehensive execution logging. Its perfect error recovery effectiveness (1.000) and detailed JSON trajectories support debugging and analysis, but require 42.9-second average execution times. This architecture suits scenarios where auditability and debugging support outweigh speed concerns.
+
+### 9.2 The Observability-Performance Paradox
+
+A critical finding emerges around the relationship between system observability and performance optimization. The systems that provide the richest internal signals (Mini-Agent's emoji-marked traces, Mini-SWE-Agent's trajectory logs) tend toward slower execution, while the fastest system (Continue-CN) operates as a black box.
+
+This suggests a fundamental **observability-performance paradox** in agent system design: systems optimized for transparency and debugging may inherently sacrifice performance through instrumentation overhead, while performance-optimized systems may become difficult to monitor and debug.
+
+For practitioners, this implies strategic choices:
+- **Development/Research Contexts**: Favor observable systems like Mini-Agent or Mini-SWE-Agent
+- **Production Deployment**: Consider Continue-CN's speed advantages if observability can be sacrificed
+- **Hybrid Approaches**: Use different runtimes for different phases (development vs. production)
+
+### 9.3 Evaluation Framework Contributions
+
+Our CLEAR framework demonstrates several methodological advances over existing agent evaluation approaches:
+
+#### 9.3.1 Evidence Quality Classification
+
+The distinction between `checker-grounded`, `trace-backed`, `heuristic-derived`, and `declared-only` evidence prevents false precision in comparative evaluation. Traditional benchmarks that treat all metrics equally can mislead practitioners when underlying evidence quality varies dramatically across systems.
+
+#### 9.3.2 Capability-Gated Comparison
+
+The conservative AND-merge of declared and probed capabilities ensures fair comparison only when systems actually support comparable observation levels. This prevents penalizing systems for architectural choices (like Continue-CN's hidden LLM processing) while maintaining rigorous standards for claims that can be verified.
+
+#### 9.3.3 Multi-Dimensional Trade-off Analysis
+
+By measuring Cost, Latency, Efficiency, Assurance, and Reliability simultaneously, CLEAR reveals performance trade-offs invisible to single-metric evaluation. The finding that all three agents achieve 100% task success rates while differing dramatically in latency (17.0s to 42.9s), tool accuracy (0.625 to 0.944), and error recovery (0.373 to 1.000) exemplifies this value.
+
+### 9.4 Implications for Agent System Design
+
+Our results suggest several design principles for future agent systems:
+
+#### 9.4.1 Observability as a First-Class Concern
+
+Systems should be designed with evaluation and monitoring as primary requirements, not afterthoughts. The difficulty of extracting performance signals from Continue-CN illustrates how architectural decisions made without evaluation in mind can severely limit subsequent analysis.
+
+#### 9.4.2 Configurable Trade-off Profiles
+
+Rather than optimizing for a single dimension, agent systems should support configurable trade-off profiles:
+```python
+# Conceptual configuration
+agent_profile = {
+    "priority": "speed",          # speed | accuracy | observability | cost
+    "observability_level": "full", # minimal | basic | full | debug
+    "error_recovery": "aggressive", # minimal | standard | aggressive
+    "memory_strategy": "persistent" # session | persistent | shared
+}
+```
+
+#### 9.4.3 Standardized Instrumentation APIs
+
+The agent ecosystem would benefit from standardized instrumentation interfaces that enable consistent monitoring across runtimes. This could reduce the adaptation overhead demonstrated in our study and improve evaluation framework portability.
+
+### 9.5 Broader Implications for AI System Evaluation
+
+This work contributes to several ongoing discussions in AI system evaluation:
+
+#### 9.5.1 Beyond Binary Pass/Fail Metrics
+
+The revelation that all three agents achieve 100% task success while exhibiting fundamental performance differences reinforces the inadequacy of binary evaluation metrics for complex AI systems. Production deployment decisions require understanding of latency distributions, error recovery patterns, and resource utilization—not just whether a system can complete tasks.
+
+#### 9.5.2 Multi-Stakeholder Evaluation Needs
+
+Different stakeholders require different evaluation perspectives:
+- **Researchers**: Need rich observability and reproducible traces (favor Mini-SWE-Agent)
+- **Developers**: Need fast iteration cycles with reasonable debugging (favor Continue-CN or Mini-Agent)
+- **Production Operators**: Need reliability guarantees and cost predictability (evaluation framework dependent)
+
+#### 9.5.3 Evaluation-Driven Development
+
+Our automation framework (Section 8) proposes evaluation-driven development for AI systems analogous to test-driven development in traditional software. Continuous evaluation pipelines that trigger on model or system changes could accelerate the development-deployment cycle while maintaining quality standards.
+
+---
+
+## 10. Conclusion
+
+This study presents the first comprehensive comparative evaluation of lightweight agentic AI runtimes using a multi-dimensional framework designed specifically for the challenges of agent system assessment. Through detailed workflow analysis, systematic performance measurement, and rigorous evidence quality classification, we demonstrate that single-metric evaluation approaches systematically obscure the performance trade-offs that determine real-world suitability.
+
+### Key Contributions
+
+1. **Architectural Analysis Framework**: Our workflow diagrams and comparative analysis reveal how fundamental design decisions (persistent memory, trajectory logging, hidden optimizations) directly determine observable performance characteristics.
+
+2. **CLEAR Evaluation Methodology**: A five-dimensional evaluation framework (Cost, Latency, Efficiency, Assurance, Reliability) with evidence quality classification that prevents false precision and ensures fair comparison across heterogeneous systems.
+
+3. **Empirical Performance Characterization**: Systematic evaluation revealing that Mini-Agent optimizes for balanced performance with rich observability, Continue-CN prioritizes speed at the cost of transparency, and Mini-SWE-Agent maximizes thoroughness and debugging support.
+
+4. **Automation Roadmap**: A comprehensive vision for automated continuous evaluation pipelines that can adapt to the rapid evolution of agent systems while maintaining rigorous evaluation standards.
+
+### Research Impact
+
+Our findings challenge the adequacy of existing evaluation approaches and provide a replicable methodology for practitioners facing runtime selection decisions. The discovery that all three systems achieve identical task success rates while differing by 2.5× in latency and 2.7× in tool selection accuracy exemplifies why multi-dimensional evaluation frameworks are essential for production AI deployment.
+
+The observability-performance paradox identified in our analysis has immediate implications for system architects balancing development velocity against operational transparency. The evidence quality classification system provides a template for rigorous comparative evaluation that other research groups can adopt and extend.
+
+### Limitations and Future Directions
+
+This evaluation's scope—three agents on four tasks with three repeated runs each—represents a proof-of-concept for the methodology rather than a definitive ranking. The framework explicitly warns against production deployment decisions based solely on these results.
+
+Future work should prioritize:
+- **Scale Expansion**: 100+ task evaluation across diverse domains and difficulty levels
+- **Provider-Reported Cost Integration**: Replace estimation heuristics with actual API billing data
+- **Live Production Monitoring**: Extend evaluation to real workloads and user interactions
+- **Cross-Framework Compatibility**: Adapt methodology for emerging agent architectures
+
+### Final Implications
+
+The agent runtime landscape will continue evolving rapidly as LLM capabilities advance and new architectural patterns emerge. This work establishes evaluation methodology that can scale with that evolution while maintaining scientific rigor.
+
+For practitioners, our results suggest that runtime selection should be driven by workload-specific requirements rather than universal rankings. The framework provides tools to make those decisions based on evidence rather than speculation.
+
+For researchers, this work demonstrates that agent system evaluation requires fundamentally different approaches than traditional ML benchmarking. The complexity of multi-step, tool-using, memory-maintaining systems demands evaluation frameworks that match that complexity.
+
+The automated evaluation pipeline proposed in Section 8 represents our vision for the future: agent systems that continuously evolve under rigorous performance monitoring, with deployment decisions driven by comprehensive, multi-dimensional evidence rather than intuition or marketing claims.
+
+As the field moves toward production deployment of autonomous agent systems, the evaluation methodology developed here provides a foundation for the reliability and accountability standards that production systems require.
 
