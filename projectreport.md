@@ -35,6 +35,7 @@ This section will survey related work including: (1) LLM agent evaluation benchm
 Understanding how each agent system processes inputs and generates outputs is crucial for interpreting our comparative evaluation. The three systems exhibit fundamentally different architectural patterns, which directly impact their performance characteristics observed in our CLEAR framework evaluation.
 
 ### 3.1.1 Mini-Agent Workflow Architecture
+*Note: This workflow diagram is based on system descriptions and observed behavior patterns from our evaluation (Sections 4.2, 5.3, 6.2). Actual implementation details may vary.*
 
 ```mermaid
 flowchart TD
@@ -65,13 +66,14 @@ flowchart TD
 ```
 
 **Key Characteristics:**
-- **Interleaved Thinking-Acting Loop**: 84.5% of wall-clock time spent in LLM inference
-- **Persistent Memory**: Cross-session state maintained via `.agent_memory.json`
-- **Context Management**: Automatic summarization at 30% token threshold
-- **MCP Integration**: Native Model Context Protocol support
-- **Claude Skills**: 15 bundled domain specializations
+- **Interleaved Thinking-Acting Loop**: 84.5% of wall-clock time spent in LLM inference (see Section 5.3)
+- **Persistent Memory**: Cross-session state maintained via `.agent_memory.json` (see Section 4.2)
+- **Context Management**: Automatic summarization at 30% token threshold (see Section 4.2)
+- **MCP Integration**: Native Model Context Protocol support (see Section 4.2)
+- **Claude Skills**: 15 bundled domain specializations (see Section 4.2)
 
 ### 3.1.2 Continue-CN Workflow Architecture
+*Note: This workflow diagram is inferred from observed behavior and system characteristics described in Sections 4.2, 5.2, 6.1. The hidden LLM processing makes internal workflow reconstruction speculative.*
 
 ```mermaid
 flowchart TD
@@ -109,13 +111,14 @@ flowchart TD
 ```
 
 **Key Characteristics:**
-- **Hidden LLM Signals**: No detectable LLM inference markers in output
-- **Node.js Architecture**: Heavy initialization phase (190-325 MB memory growth)
-- **IDE Integration**: General-purpose coding assistant design
-- **Fastest Execution**: 17.0s average, optimized for speed
-- **Auto-Continue**: Autonomous multi-step execution
+- **Hidden LLM Signals**: No detectable LLM inference markers in output (see Section 6.1)
+- **Node.js Architecture**: Heavy initialization phase (190-325 MB memory growth) (see Section 5.4)
+- **IDE Integration**: General-purpose coding assistant design (see Section 4.2)
+- **Fastest Execution**: 17.0s average, optimized for speed (see Section 5.2)
+- **Auto-Continue**: Autonomous multi-step execution (see Section 4.2)
 
 ### 3.1.3 Mini-SWE-Agent Workflow Architecture
+*Note: This workflow diagram is based on system descriptions and trajectory file analysis described in Sections 4.2, 4.5, 5.3. The trajectory-based nature provides more observable internal structure.*
 
 ```mermaid
 flowchart TD
@@ -125,9 +128,9 @@ flowchart TD
     D --> E[🤖 LLM Planning<br/>openai/gpt-5-mini]
     E --> F[Action Generation]
     F --> G{Action Type?}
-    G -->|File Operation| H[📁 File Tool]
-    G -->|Code Execution| I[⚡ Exec Tool]
-    G -->|Analysis| J[🔍 Analysis Tool]
+    G -->|File Operation| H[File Tool]
+    G -->|Code Execution| I[Execution Tool]
+    G -->|Analysis| J[Analysis Tool]
     H --> K[Trajectory Logging]
     I --> K
     J --> K
@@ -158,11 +161,11 @@ flowchart TD
 ```
 
 **Key Characteristics:**
-- **Trajectory-Based**: Complete execution history in JSON format
-- **SWE-Bench Inspired**: Software engineering task optimization
-- **Comprehensive Logging**: Every tool call and state change recorded
-- **Thorough Processing**: 65.0% LLM inference, 26.7% tool execution
-- **Yolo Mode**: Non-interactive execution with `--exit-immediately`
+- **Trajectory-Based**: Complete execution history in JSON format (see Section 4.2)
+- **SWE-Bench Inspired**: Software engineering task optimization (see Section 4.2)
+- **Comprehensive Logging**: Every tool call and state change recorded (see Section 4.5)
+- **Thorough Processing**: 65.0% LLM inference, 26.7% tool execution (see Section 5.3)
+- **Yolo Mode**: Non-interactive execution with `--exit-immediately` (see Section 4.2)
 
 ### 3.1.4 Comparative Architecture Analysis
 
@@ -171,11 +174,11 @@ flowchart TD
 | **Primary Design** | Persistent reasoning | Speed-optimized IDE | Trajectory-complete |
 | **Memory Strategy** | Cross-session persistence | Session-scoped | Full trajectory log |
 | **Observable Signals** | Rich emoji markers | Minimal/hidden | JSON-structured |
-| **Time Distribution** | 84.5% LLM / 11.6% Tools | Hidden LLM / 37.2% Tools | 65.0% LLM / 26.7% Tools |
+| **Time Distribution** | 84.5% LLM / 11.6% Tools (Section 5.3) | Hidden LLM / 37.2% Tools (Section 6.1) | 65.0% LLM / 26.7% Tools (Section 5.3) |
 | **Context Management** | Auto-summarization | Runtime-handled | Full retention |
 | **Execution Model** | Step-limited loop | Auto-continue | Exit-immediate |
 
-These architectural differences directly explain the performance trade-offs observed in our CLEAR framework evaluation: Continue-CN's speed comes at the cost of observability, Mini-Agent's balanced performance relies on sophisticated memory management, and Mini-SWE-Agent's thoroughness requires extensive trajectory tracking overhead.
+These architectural differences directly explain the performance trade-offs observed in our CLEAR framework evaluation: Continue-CN's speed comes at the cost of observability (Section 6.1), Mini-Agent's balanced performance relies on sophisticated memory management (Section 4.2), and Mini-SWE-Agent's thoroughness requires extensive trajectory tracking overhead (Section 5.4).
 
 ## 4. Methodology
 
@@ -889,15 +892,15 @@ This automation framework transforms our current manual evaluation process into 
 
 Our comprehensive evaluation reveals that agent runtime architecture fundamentally determines observable performance characteristics. The three systems studied represent distinct philosophical approaches to agent design, each optimizing for different operational priorities:
 
-**Mini-Agent's Persistent Reasoning Paradigm** achieves the highest overall score through sophisticated memory management and context summarization, but at the cost of reasoning coherence. Its 84.5% LLM inference time allocation suggests an architecture optimized for thoughtful, step-by-step problem solving. The interleaved thinking-acting loop with persistent memory provides continuity across sessions but requires careful resource management to avoid context overflow.
+**Mini-Agent's Persistent Reasoning Paradigm** achieves the highest overall score through sophisticated memory management and context summarization, but at the cost of reasoning coherence (Section 5.3). Its 84.5% LLM inference time allocation (Section 5.3) suggests an architecture optimized for thoughtful, step-by-step problem solving. The interleaved thinking-acting loop with persistent memory (Section 4.2) provides continuity across sessions but requires careful resource management to avoid context overflow (Section 5.5).
 
-**Continue-CN's Speed-First Architecture** prioritizes execution velocity through hidden optimizations that sacrifice observability. The absence of detectable LLM signals indicates aggressive caching or preprocessing that achieves 17.0-second average task completion but reduces tool selection accuracy to 0.625. This trade-off may be acceptable for development workflows where rapid iteration trumps exhaustive analysis.
+**Continue-CN's Speed-First Architecture** prioritizes execution velocity through hidden optimizations that sacrifice observability (Section 6.1). The absence of detectable LLM signals (Section 6.1) indicates aggressive caching or preprocessing that achieves 17.0-second average task completion (Section 5.2) but reduces tool selection accuracy to 0.625 (Section 5.3). This trade-off may be acceptable for development workflows where rapid iteration trumps exhaustive analysis.
 
-**Mini-SWE-Agent's Trajectory-Complete Design** maximizes thoroughness and reproducibility through comprehensive execution logging. Its perfect error recovery effectiveness (1.000) and detailed JSON trajectories support debugging and analysis, but require 42.9-second average execution times. This architecture suits scenarios where auditability and debugging support outweigh speed concerns.
+**Mini-SWE-Agent's Trajectory-Complete Design** maximizes thoroughness and reproducibility through comprehensive execution logging (Section 4.2). Its perfect error recovery effectiveness (1.000) (Section 5.3) and detailed JSON trajectories (Section 4.2) support debugging and analysis, but require 42.9-second average execution times (Section 5.2). This architecture suits scenarios where auditability and debugging support outweigh speed concerns.
 
 ### 9.2 The Observability-Performance Paradox
 
-A critical finding emerges around the relationship between system observability and performance optimization. The systems that provide the richest internal signals (Mini-Agent's emoji-marked traces, Mini-SWE-Agent's trajectory logs) tend toward slower execution, while the fastest system (Continue-CN) operates as a black box.
+A critical finding emerges around the relationship between system observability and performance optimization. The systems that provide the richest internal signals (Mini-Agent's emoji-marked traces (Section 6.2), Mini-SWE-Agent's trajectory logs (Section 4.2)) tend toward slower execution, while the fastest system (Continue-CN) operates as a black box (Section 6.1).
 
 This suggests a fundamental **observability-performance paradox** in agent system design: systems optimized for transparency and debugging may inherently sacrifice performance through instrumentation overhead, while performance-optimized systems may become difficult to monitor and debug.
 
@@ -920,7 +923,7 @@ The conservative AND-merge of declared and probed capabilities ensures fair comp
 
 #### 9.3.3 Multi-Dimensional Trade-off Analysis
 
-By measuring Cost, Latency, Efficiency, Assurance, and Reliability simultaneously, CLEAR reveals performance trade-offs invisible to single-metric evaluation. The finding that all three agents achieve 100% task success rates while differing dramatically in latency (17.0s to 42.9s), tool accuracy (0.625 to 0.944), and error recovery (0.373 to 1.000) exemplifies this value.
+By measuring Cost, Latency, Efficiency, Assurance, and Reliability simultaneously, CLEAR reveals performance trade-offs invisible to single-metric evaluation. The finding that all three agents achieve 100% task success rates (Section 5.2) while differing dramatically in latency (17.0s to 42.9s) (Section 5.2), tool accuracy (0.625 to 0.944) (Section 5.3), and error recovery (0.373 to 1.000) (Section 5.3) exemplifies this value.
 
 ### 9.4 Implications for Agent System Design
 
@@ -928,7 +931,7 @@ Our results suggest several design principles for future agent systems:
 
 #### 9.4.1 Observability as a First-Class Concern
 
-Systems should be designed with evaluation and monitoring as primary requirements, not afterthoughts. The difficulty of extracting performance signals from Continue-CN illustrates how architectural decisions made without evaluation in mind can severely limit subsequent analysis.
+Systems should be designed with evaluation and monitoring as primary requirements, not afterthoughts. The difficulty of extracting performance signals from Continue-CN (Section 6.1) illustrates how architectural decisions made without evaluation in mind can severely limit subsequent analysis.
 
 #### 9.4.2 Configurable Trade-off Profiles
 
@@ -953,7 +956,7 @@ This work contributes to several ongoing discussions in AI system evaluation:
 
 #### 9.5.1 Beyond Binary Pass/Fail Metrics
 
-The revelation that all three agents achieve 100% task success while exhibiting fundamental performance differences reinforces the inadequacy of binary evaluation metrics for complex AI systems. Production deployment decisions require understanding of latency distributions, error recovery patterns, and resource utilization—not just whether a system can complete tasks.
+The revelation that all three agents achieve 100% task success (Section 5.2) while exhibiting fundamental performance differences (Section 5.3) reinforces the inadequacy of binary evaluation metrics for complex AI systems. Production deployment decisions require understanding of latency distributions, error recovery patterns, and resource utilization—not just whether a system can complete tasks.
 
 #### 9.5.2 Multi-Stakeholder Evaluation Needs
 
@@ -984,13 +987,13 @@ This study presents the first comprehensive comparative evaluation of lightweigh
 
 ### Research Impact
 
-Our findings challenge the adequacy of existing evaluation approaches and provide a replicable methodology for practitioners facing runtime selection decisions. The discovery that all three systems achieve identical task success rates while differing by 2.5× in latency and 2.7× in tool selection accuracy exemplifies why multi-dimensional evaluation frameworks are essential for production AI deployment.
+Our findings challenge the adequacy of existing evaluation approaches and provide a replicable methodology for practitioners facing runtime selection decisions. The discovery that all three systems achieve identical task success rates (Section 5.2) while differing by 2.5× in latency (Section 5.2) and 2.7× in tool selection accuracy (Section 5.3) exemplifies why multi-dimensional evaluation frameworks are essential for production AI deployment.
 
 The observability-performance paradox identified in our analysis has immediate implications for system architects balancing development velocity against operational transparency. The evidence quality classification system provides a template for rigorous comparative evaluation that other research groups can adopt and extend.
 
 ### Limitations and Future Directions
 
-This evaluation's scope—three agents on four tasks with three repeated runs each—represents a proof-of-concept for the methodology rather than a definitive ranking. The framework explicitly warns against production deployment decisions based solely on these results.
+This evaluation's scope—three agents on four tasks with three repeated runs each—represents a proof-of-concept for the methodology rather than a definitive ranking (Section 7.1). The framework explicitly warns against production deployment decisions based solely on these results (Section 7.6).
 
 Future work should prioritize:
 - **Scale Expansion**: 100+ task evaluation across diverse domains and difficulty levels
