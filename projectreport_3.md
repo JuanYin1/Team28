@@ -2,7 +2,7 @@
 
 **Team 28**
 
-**Authors: Will Luo, Haochen Jiang, Yin Juan, Zhirui Xia, Hongyi Pan**
+**Authors: Will Luo, Haochen Jiang, Juan Yin, Zhirui Xia, Hongyi Pan**
 
 ---
 
